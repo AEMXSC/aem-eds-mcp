@@ -77,7 +77,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 1/3 | In Progress|  |
+| 1. Foundation | 2/3 | In Progress|  |
 | 2. Auth Flow | 0/TBD | Not started | - |
 | 3. Deploy & DNS | 0/TBD | Not started | - |
 | 4. Validate & Ship | 0/TBD | Not started | - |
