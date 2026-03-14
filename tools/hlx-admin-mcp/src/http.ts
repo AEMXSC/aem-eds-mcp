@@ -163,6 +163,7 @@ async function resolveSessionToken(sessionToken: string): Promise<string | null>
 // ─── Express app ─────────────────────────────────────────────────────────────
 
 const app = express();
+app.set("trust proxy", 1); // Required: Railway terminates TLS at the edge and forwards plain HTTP
 
 // Parse JSON bodies for MCP endpoint
 app.use("/mcp", express.json());
@@ -333,7 +334,7 @@ let activePort = BASE_PORT;
 
 async function tryListen(port: number): Promise<boolean> {
   return new Promise((resolve) => {
-    const srv = app.listen(port, "127.0.0.1", () => {
+    const srv = app.listen(port, "0.0.0.0", () => {
       activePort = port;
       resolve(true);
     });
@@ -350,13 +351,10 @@ async function tryListen(port: number): Promise<boolean> {
 
 async function main() {
   // Start MCP HTTP server
-  for (let port = BASE_PORT; port <= BASE_PORT + 10; port++) {
-    const ok = await tryListen(port);
-    if (ok) break;
-    if (port === BASE_PORT + 10) {
-      process.stderr.write(`[hlx-admin-mcp] ERROR: Could not bind to any port in range ${BASE_PORT}-${BASE_PORT + 10}.\n`);
-      process.exit(1);
-    }
+  const ok = await tryListen(BASE_PORT);
+  if (!ok) {
+    process.stderr.write(`[hlx-admin-mcp] ERROR: Could not bind to port ${BASE_PORT}.\n`);
+    process.exit(1);
   }
 
   const mode = SERVER_TO_SERVER_MODE
