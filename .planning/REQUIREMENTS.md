@@ -10,8 +10,8 @@
 ### Hosting
 
 - [ ] **HOST-01**: Server runs persistently at `https://mcp.aemxsc.com` (Railway deployment)
-- [ ] **HOST-02**: Server binds to `0.0.0.0` + `process.env.PORT` (Railway compatible)
-- [ ] **HOST-03**: Single HTTP port — no dual-server architecture (Railway only exposes one port)
+- [x] **HOST-02**: Server binds to `0.0.0.0` + `process.env.PORT` (Railway compatible)
+- [x] **HOST-03**: Single HTTP port — no dual-server architecture (Railway only exposes one port)
 - [ ] **HOST-04**: `GET /health` returns HTTP 200 (Railway health check)
 - [ ] **HOST-05**: `railway.toml` config with start command and health check path
 
@@ -95,8 +95,8 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| HOST-02 | Phase 1: Foundation | Pending |
-| HOST-03 | Phase 1: Foundation | Pending |
+| HOST-02 | Phase 1: Foundation | Complete |
+| HOST-03 | Phase 1: Foundation | Complete |
 | HOST-04 | Phase 1: Foundation | Pending |
 | HOST-05 | Phase 1: Foundation | Pending |
 | AUTH-01 | Phase 2: Auth Flow | Pending |

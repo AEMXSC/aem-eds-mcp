@@ -1,3 +1,19 @@
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+status: executing
+stopped_at: Completed 01-foundation-01-01-PLAN.md
+last_updated: "2026-03-14T19:25:31.948Z"
+last_activity: "2026-03-14 — Plan 01-01 complete: collapsed dual-server to single Railway-compatible Express app"
+progress:
+  total_phases: 4
+  completed_phases: 0
+  total_plans: 3
+  completed_plans: 1
+  percent: 33
+---
+
 # Project State
 
 ## Project Reference
@@ -10,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Phase: 1 of 4 (Foundation)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-03-14 — Roadmap created, ready to begin Phase 1 planning
+Plan: 1 of 3 in current phase
+Status: In progress
+Last activity: 2026-03-14 — Plan 01-01 complete: collapsed dual-server to single Railway-compatible Express app
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [███░░░░░░░] 33%
 
 ## Performance Metrics
 
@@ -34,6 +50,7 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: -
 
 *Updated after each plan completion*
+| Phase 01-foundation P01 | 3 | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -45,6 +62,9 @@ Recent decisions affecting current work:
 - Setup: Railway for hosting — persistent Node.js process required for in-memory session Map (serverless incompatible)
 - Setup: In-memory Map for sessions — simplest path to March 24; Redis is v2
 - Setup: Single Express app on one port — dual-server architecture must be collapsed before Railway deploy
+- [Phase 01-foundation]: Removed oauthApp entirely — OAuth endpoints will be refactored to main app in Phase 2 with PUBLIC_URL
+- [Phase 01-foundation]: Port scan loop removed — Railway assigns a single PORT, scanning is unnecessary
+- [Phase 01-foundation]: C:\Program Files\Git\.well-known routes use http;\localhost;3000 placeholder — Phase 2 replaces with process.env.PUBLIC_URL
 
 ### Pending Todos
 
@@ -58,6 +78,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14
-Stopped at: Roadmap created — ROADMAP.md, STATE.md written; REQUIREMENTS.md traceability updated
+Last session: 2026-03-14T19:25:31.945Z
+Stopped at: Completed 01-foundation-01-01-PLAN.md
 Resume file: None
