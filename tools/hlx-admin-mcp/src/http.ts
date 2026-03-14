@@ -203,6 +203,104 @@ app.get("/.well-known/oauth-protected-resource", (_req: Request, res: Response) 
   });
 });
 
+// ─── Auth routes ──────────────────────────────────────────────────────────────
+
+app.get("/login", (req: Request, res: Response) => {
+  const sessionId = req.query.session as string | undefined;
+  if (!sessionId) {
+    res.status(400).send("Missing required query parameter: session");
+    return;
+  }
+
+  if (!IMS_CLIENT_ID) {
+    res.status(503).send("IMS OAuth not configured — set ADOBE_IMS_CLIENT_ID env var");
+    return;
+  }
+
+  const imsCodeVerifier = generateCodeVerifier();
+  const imsCodeChallenge = generateCodeChallenge(imsCodeVerifier);
+  const imsState = randomBytes(16).toString("hex");
+  const publicUrl = process.env.PUBLIC_URL ?? `http://localhost:${activePort}`;
+  const redirectUri = `${publicUrl}/callback`;
+
+  pendingOAuthStates.set(imsState, {
+    sessionId,
+    imsCodeVerifier,
+    createdAt: Date.now(),
+  });
+
+  const authorizeUrl = new URL(`${IMS_BASE}/ims/authorize/v2`);
+  authorizeUrl.searchParams.set("client_id", IMS_CLIENT_ID);
+  authorizeUrl.searchParams.set("redirect_uri", redirectUri);
+  authorizeUrl.searchParams.set("response_type", "code");
+  authorizeUrl.searchParams.set("scope", "openid,AdobeID,additional_info.roles,read_organizations,offline_access");
+  authorizeUrl.searchParams.set("code_challenge", imsCodeChallenge);
+  authorizeUrl.searchParams.set("code_challenge_method", "S256");
+  authorizeUrl.searchParams.set("state", imsState);
+
+  process.stderr.write(`[auth] /login initiated — session=${sessionId.slice(0, 8)}... state=${imsState.slice(0, 8)}...\n`);
+  res.redirect(authorizeUrl.toString());
+});
+
+app.get("/callback", async (req: Request, res: Response) => {
+  const code = req.query.code as string | undefined;
+  const state = req.query.state as string | undefined;
+  const error = req.query.error as string | undefined;
+
+  if (error) {
+    const desc = req.query.error_description as string | undefined;
+    res.status(400).send(`IMS login error: ${error}${desc ? ` — ${desc}` : ""}`);
+    return;
+  }
+
+  if (!code || !state) {
+    res.status(400).send("Missing required parameters: code and state are both required");
+    return;
+  }
+
+  const pending = pendingOAuthStates.get(state);
+  if (!pending) {
+    res.status(400).send("Unknown or expired OAuth state. Please start the login flow again by visiting /login.");
+    return;
+  }
+  pendingOAuthStates.delete(state);
+
+  const publicUrl = process.env.PUBLIC_URL ?? `http://localhost:${activePort}`;
+  const redirectUri = `${publicUrl}/callback`;
+
+  try {
+    const tokenData = await exchangeCodeForToken(
+      IMS_CLIENT_ID!,
+      code,
+      pending.imsCodeVerifier,
+      redirectUri,
+    );
+
+    sessions.set(pending.sessionId, {
+      imsToken: tokenData.access_token,
+      imsRefreshToken: tokenData.refresh_token,
+      imsExpiresAt: Date.now() + tokenData.expires_in * 1000,
+      clientId: IMS_CLIENT_ID!,
+      createdAt: Date.now(),
+    });
+
+    process.stderr.write(`[auth] /callback success — session=${pending.sessionId.slice(0, 8)}... stored\n`);
+
+    res.send(`<!DOCTYPE html>
+<html><head><title>Login Successful</title></head>
+<body style="font-family:sans-serif;max-width:600px;margin:40px auto;padding:20px">
+<h1>Login successful</h1>
+<p>You are now authenticated. Return to Claude and retry your request.</p>
+<p>Your session ID: <code style="background:#f0f0f0;padding:2px 6px">${pending.sessionId}</code></p>
+<p>Use this as your Bearer token in the MCP client configuration.</p>
+</body></html>`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[auth] /callback token exchange failed: ${msg}\n`);
+    res.status(500).send(`Token exchange failed: ${msg}. Please try logging in again.`);
+  }
+});
+
 // ─── MCP JSON-RPC endpoint ────────────────────────────────────────────────────
 
 app.post("/mcp", async (req: Request, res: Response) => {
@@ -216,13 +314,38 @@ app.post("/mcp", async (req: Request, res: Response) => {
       return;
     }
   } else if (IMS_OAUTH_ENABLED) {
-    // IMS OAuth User Auth: accept Bearer session token if present
+    // IMS OAuth User Auth: require a valid Bearer session token
     const sessionToken = extractBearer(req);
-    if (sessionToken) {
-      imsToken = await resolveSessionToken(sessionToken);
-      // If session token invalid, fall through to stored HLX token (null imsToken)
+    if (!sessionToken) {
+      // No Bearer token — return 401 with login URL embedded
+      const sessionId = uuidv4();
+      const publicUrl = process.env.PUBLIC_URL ?? `http://localhost:${activePort}`;
+      const loginUrl = `${publicUrl}/login?session=${sessionId}`;
+      res.status(401)
+        .setHeader("WWW-Authenticate", `Bearer realm="hlx-admin-mcp"`)
+        .json({
+          error: "unauthenticated",
+          message: `Not authenticated. Visit this URL to log in:\n${loginUrl}`,
+          login_url: loginUrl,
+        });
+      return;
     }
-    // No Bearer token → allow through; tool handlers will use stored HLX site token
+
+    imsToken = await resolveSessionToken(sessionToken);
+    if (!imsToken) {
+      // Session token invalid or expired — return 401 with fresh login URL
+      const sessionId = uuidv4();
+      const publicUrl = process.env.PUBLIC_URL ?? `http://localhost:${activePort}`;
+      const loginUrl = `${publicUrl}/login?session=${sessionId}`;
+      res.status(401)
+        .setHeader("WWW-Authenticate", `Bearer realm="hlx-admin-mcp", error="invalid_token"`)
+        .json({
+          error: "session_expired",
+          message: `Session expired or invalid. Visit this URL to log in again:\n${loginUrl}`,
+          login_url: loginUrl,
+        });
+      return;
+    }
   }
   // else: no ADOBE_IMS_CLIENT_ID → no IMS OAuth, rely entirely on stored HLX site token
 
