@@ -46,15 +46,11 @@ const IMS_OAUTH_ENABLED = !!IMS_CLIENT_ID && !IMS_CLIENT_SECRET;
 // ─── In-memory session stores ─────────────────────────────────────────────────
 
 interface PendingOAuthState {
-  /** Claude Code's redirect URI */
-  claudeRedirectUri: string;
-  /** PKCE challenge from Claude Code (for us to verify at /token) */
-  claudeCodeChallenge: string;
-  /** state parameter from Claude Code */
-  claudeState: string;
-  /** PKCE verifier we used for the IMS leg */
+  /** Session UUID from /login?session=<uuid> — carried through IMS redirect */
+  sessionId: string;
+  /** PKCE verifier for the IMS token exchange leg */
   imsCodeVerifier: string;
-  /** Timestamp for cleanup */
+  /** Timestamp for stale-entry cleanup */
   createdAt: number;
 }
 
@@ -185,27 +181,24 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // ─── OAuth Discovery ─────────────────────────────────────────────────────────
 
 app.get("/.well-known/oauth-authorization-server", (_req: Request, res: Response) => {
-  // TODO Phase 2: replace with process.env.PUBLIC_URL
-  const oauthBase = "http://localhost:3000";
-  const mcpBase = `http://localhost:${activePort}`;
+  const publicUrl = process.env.PUBLIC_URL ?? `http://localhost:${activePort}`;
   res.json({
-    issuer: oauthBase,
-    authorization_endpoint: `${oauthBase}/authorize`,
-    token_endpoint: `${oauthBase}/token`,
+    issuer: publicUrl,
+    authorization_endpoint: `${publicUrl}/authorize`,
+    token_endpoint: `${publicUrl}/token`,
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
     scopes_supported: ["openid", "AdobeID"],
-    resource: mcpBase,
+    resource: publicUrl,
   });
 });
 
 app.get("/.well-known/oauth-protected-resource", (_req: Request, res: Response) => {
-  // TODO Phase 2: replace with process.env.PUBLIC_URL
-  const oauthBase = "http://localhost:3000";
+  const publicUrl = process.env.PUBLIC_URL ?? `http://localhost:${activePort}`;
   res.json({
-    resource: `http://localhost:${activePort}`,
-    authorization_servers: [oauthBase],
+    resource: publicUrl,
+    authorization_servers: [publicUrl],
     scopes_supported: ["openid", "AdobeID"],
   });
 });
