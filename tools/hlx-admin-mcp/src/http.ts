@@ -2,24 +2,17 @@
 /**
  * hlx-admin MCP HTTP Server with Adobe IMS OAuth 2.1 proxy.
  *
- * Dual-server architecture (Adobe requires HTTPS for redirect URIs):
+ * Single-server architecture on Railway:
  *
- *   Claude Code → http://localhost:3000/mcp     (plain HTTP — no cert issues)
- *   IMS OAuth   → https://localhost:3443/callback (HTTPS — self-signed cert)
+ *   Claude Code → http://<railway-domain>/mcp  (plain HTTP via Railway proxy)
  *
- *   Discovery at http://localhost:3000/.well-known/oauth-authorization-server
- *   points Claude Code to the HTTPS OAuth endpoints.
- *
- *   Self-signed cert is auto-generated at startup. Accept the browser warning
- *   once at https://localhost:3443 — you will only need to do this once.
+ *   Discovery at /.well-known/oauth-authorization-server
+ *   OAuth endpoints run on the same single Express server.
  */
 
 import express, { type Request, type Response, type NextFunction } from "express";
 import { createHash, randomBytes } from "node:crypto";
-import { createServer as createHttpsServer } from "node:https";
 import { v4 as uuidv4 } from "uuid";
-// @ts-ignore — no types for selfsigned
-import selfsigned from "selfsigned";
 
 import {
   SERVER_VERSION,
@@ -40,8 +33,7 @@ setHttpMode(true);
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
-const BASE_PORT = parseInt(process.env.HLX_MCP_PORT ?? "3000", 10);
-const OAUTH_PORT = parseInt(process.env.HLX_OAUTH_PORT ?? "3443", 10);
+const BASE_PORT = parseInt(process.env.PORT ?? process.env.HLX_MCP_PORT ?? "3000", 10);
 const IMS_CLIENT_ID = process.env.ADOBE_IMS_CLIENT_ID;
 const IMS_CLIENT_SECRET = process.env.ADOBE_IMS_CLIENT_SECRET;
 
@@ -50,9 +42,6 @@ const SERVER_TO_SERVER_MODE = !!(IMS_CLIENT_ID && IMS_CLIENT_SECRET);
 
 // IMS OAuth mode: only used if ADOBE_IMS_CLIENT_ID is set (optional)
 const IMS_OAUTH_ENABLED = !!IMS_CLIENT_ID && !IMS_CLIENT_SECRET;
-
-// HTTPS callback URI (required by Adobe IMS for redirect)
-const OAUTH_CALLBACK_URI = `https://localhost:${OAUTH_PORT}/callback`;
 
 // ─── In-memory session stores ─────────────────────────────────────────────────
 
