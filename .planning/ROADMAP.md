@@ -28,7 +28,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. There is one Express app on one port — no separate HTTPS server on `:3443`, no `selfsigned` dependency
   3. `GET /health` returns HTTP 200 with a JSON body
   4. `railway.toml` exists with build command, start command, and `/health` health check path
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Remove dual-server from http.ts, fix port binding and bind address (HOST-02, HOST-03)
+- [ ] 01-02-PLAN.md — Create railway.toml and test-phase1.sh smoke test script (HOST-05)
+- [ ] 01-03-PLAN.md — Uninstall selfsigned package and run full phase test suite (HOST-02, HOST-03, HOST-04)
 
 ### Phase 2: Auth Flow
 **Goal**: Users can authenticate via Adobe IMS PKCE from the hosted server — unauthenticated calls return a clickable login URL, authenticated calls resolve tokens from server-side sessions
@@ -72,7 +77,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/TBD | Not started | - |
+| 1. Foundation | 0/3 | Not started | - |
 | 2. Auth Flow | 0/TBD | Not started | - |
 | 3. Deploy & DNS | 0/TBD | Not started | - |
 | 4. Validate & Ship | 0/TBD | Not started | - |
