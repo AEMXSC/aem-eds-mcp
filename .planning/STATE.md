@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-auth-flow-02-02-PLAN.md
-last_updated: "2026-03-14T22:45:27.600Z"
+stopped_at: Completed 02-auth-flow-02-03-PLAN.md
+last_updated: "2026-03-14T22:48:46.616Z"
 last_activity: "2026-03-14 — Plan 01-02 complete: railway.toml + test-phase1.sh smoke test script"
 progress:
   total_phases: 4
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 6
-  completed_plans: 5
+  completed_plans: 6
   percent: 67
 ---
 
@@ -54,6 +54,7 @@ Progress: [██████░░░░] 67%
 | Phase 01-foundation P03 | 3 | 2 tasks | 2 files |
 | Phase 02-auth-flow P01 | 1 | 1 tasks | 1 files |
 | Phase 02-auth-flow P02 | 8366 | 2 tasks | 1 files |
+| Phase 02-auth-flow P03 | 1 | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -76,6 +77,7 @@ Recent decisions affecting current work:
 - [Phase 02-auth-flow]: pendingOAuthStates keyed by IMS state param (random hex) not session UUID — prevents session fixation; session UUID travels inside pending state value
 - [Phase 02-auth-flow]: 401 responses generate fresh uuidv4 sessionId per request — never derive from incoming Authorization header
 - [Phase 02-auth-flow]: publicUrl resolved as: process.env.PUBLIC_URL ?? http://localhost:${activePort} — single pattern across all route handlers
+- [Phase 02-auth-flow]: da_login httpMode branch returns URL guidance text pointing user to the 401 response login_url — avoids duplicating session URL logic already in http.ts
 
 ### Pending Todos
 
@@ -89,6 +91,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T22:45:27.597Z
-Stopped at: Completed 02-auth-flow-02-02-PLAN.md
+Last session: 2026-03-14T22:48:46.613Z
+Stopped at: Completed 02-auth-flow-02-03-PLAN.md
 Resume file: None
