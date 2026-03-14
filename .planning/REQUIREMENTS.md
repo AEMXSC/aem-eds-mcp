@@ -24,11 +24,11 @@
 
 ### Authentication
 
-- [ ] **AUTH-01**: Unauthenticated tool calls return a human-readable login URL in the response (not a raw error)
-- [ ] **AUTH-02**: `GET /login?session=<id>` initiates Adobe IMS PKCE OAuth flow
+- [x] **AUTH-01**: Unauthenticated tool calls return a human-readable login URL in the response (not a raw error)
+- [x] **AUTH-02**: `GET /login?session=<id>` initiates Adobe IMS PKCE OAuth flow
 - [ ] **AUTH-03**: `GET /callback` receives OAuth code, exchanges for token, stores in server-side session
 - [ ] **AUTH-04**: Session tokens stored in-memory Map (keyed by session UUID)
-- [ ] **AUTH-05**: `PUBLIC_URL` env var used for all OAuth callback/redirect URIs (no hardcoded localhost)
+- [x] **AUTH-05**: `PUBLIC_URL` env var used for all OAuth callback/redirect URIs (no hardcoded localhost)
 - [ ] **AUTH-06**: `darkalley` client_id PKCE flow registered at `https://mcp.aemxsc.com/callback`
 
 > **External dependency:** AUTH-06 requires Adobe team to add `https://mcp.aemxsc.com/callback` to darkalley's allowed redirect URIs in Adobe Developer Console. Must be initiated on day 1.
@@ -39,7 +39,7 @@
 - [ ] **DA-02**: `da_get_content` — reads content from `content.da.live/{org}/{site}/{path}`
 - [ ] **DA-03**: `da_update_content` — writes content to `admin.da.live/source/{org}/{site}/{path}` (multipart FormData)
 - [ ] **DA-04**: `da_whoami` — returns authenticated user info from IMS
-- [ ] **DA-05**: `da_login` — returns login URL (not browser open) when in hosted mode
+- [x] **DA-05**: `da_login` — returns login URL (not browser open) when in hosted mode
 - [ ] **DA-06**: `da_logout` — clears session token
 
 ### HLX Admin Tools
@@ -99,13 +99,13 @@
 | HOST-03 | Phase 1: Foundation | Complete |
 | HOST-04 | Phase 1: Foundation | Complete |
 | HOST-05 | Phase 1: Foundation | Complete |
-| AUTH-01 | Phase 2: Auth Flow | Pending |
-| AUTH-02 | Phase 2: Auth Flow | Pending |
+| AUTH-01 | Phase 2: Auth Flow | Complete |
+| AUTH-02 | Phase 2: Auth Flow | Complete |
 | AUTH-03 | Phase 2: Auth Flow | Pending |
 | AUTH-04 | Phase 2: Auth Flow | Pending |
-| AUTH-05 | Phase 2: Auth Flow | Pending |
+| AUTH-05 | Phase 2: Auth Flow | Complete |
 | AUTH-06 | Phase 2: Auth Flow | Pending |
-| DA-05 | Phase 2: Auth Flow | Pending |
+| DA-05 | Phase 2: Auth Flow | Complete |
 | HOST-01 | Phase 3: Deploy & DNS | Pending |
 | DNS-01 | Phase 3: Deploy & DNS | Pending |
 | DNS-02 | Phase 3: Deploy & DNS | Pending |
