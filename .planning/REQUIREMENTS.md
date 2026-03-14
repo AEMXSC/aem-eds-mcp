@@ -26,10 +26,10 @@
 
 - [x] **AUTH-01**: Unauthenticated tool calls return a human-readable login URL in the response (not a raw error)
 - [x] **AUTH-02**: `GET /login?session=<id>` initiates Adobe IMS PKCE OAuth flow
-- [ ] **AUTH-03**: `GET /callback` receives OAuth code, exchanges for token, stores in server-side session
-- [ ] **AUTH-04**: Session tokens stored in-memory Map (keyed by session UUID)
+- [x] **AUTH-03**: `GET /callback` receives OAuth code, exchanges for token, stores in server-side session
+- [x] **AUTH-04**: Session tokens stored in-memory Map (keyed by session UUID)
 - [x] **AUTH-05**: `PUBLIC_URL` env var used for all OAuth callback/redirect URIs (no hardcoded localhost)
-- [ ] **AUTH-06**: `darkalley` client_id PKCE flow registered at `https://mcp.aemxsc.com/callback`
+- [x] **AUTH-06**: `darkalley` client_id PKCE flow registered at `https://mcp.aemxsc.com/callback`
 
 > **External dependency:** AUTH-06 requires Adobe team to add `https://mcp.aemxsc.com/callback` to darkalley's allowed redirect URIs in Adobe Developer Console. Must be initiated on day 1.
 
@@ -101,10 +101,10 @@
 | HOST-05 | Phase 1: Foundation | Complete |
 | AUTH-01 | Phase 2: Auth Flow | Complete |
 | AUTH-02 | Phase 2: Auth Flow | Complete |
-| AUTH-03 | Phase 2: Auth Flow | Pending |
-| AUTH-04 | Phase 2: Auth Flow | Pending |
+| AUTH-03 | Phase 2: Auth Flow | Complete |
+| AUTH-04 | Phase 2: Auth Flow | Complete |
 | AUTH-05 | Phase 2: Auth Flow | Complete |
-| AUTH-06 | Phase 2: Auth Flow | Pending |
+| AUTH-06 | Phase 2: Auth Flow | Complete |
 | DA-05 | Phase 2: Auth Flow | Complete |
 | HOST-01 | Phase 3: Deploy & DNS | Pending |
 | DNS-01 | Phase 3: Deploy & DNS | Pending |

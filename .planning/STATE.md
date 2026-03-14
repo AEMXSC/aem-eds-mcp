@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-auth-flow-02-01-PLAN.md
-last_updated: "2026-03-14T20:24:23.749Z"
+stopped_at: Completed 02-auth-flow-02-02-PLAN.md
+last_updated: "2026-03-14T22:45:27.600Z"
 last_activity: "2026-03-14 — Plan 01-02 complete: railway.toml + test-phase1.sh smoke test script"
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 6
-  completed_plans: 4
+  completed_plans: 5
   percent: 67
 ---
 
@@ -53,6 +53,7 @@ Progress: [██████░░░░] 67%
 | Phase 01-foundation P01 | 3 | 3 tasks | 1 files |
 | Phase 01-foundation P03 | 3 | 2 tasks | 2 files |
 | Phase 02-auth-flow P01 | 1 | 1 tasks | 1 files |
+| Phase 02-auth-flow P02 | 8366 | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -72,6 +73,9 @@ Recent decisions affecting current work:
 - [Phase 01-foundation]: selfsigned removed via npm uninstall — updates both package.json and lockfile atomically
 - [Phase 02-auth-flow]: DA-05 automated check skipped — da_login httpMode requires live IMS Bearer; manual verification documented in script
 - [Phase 02-auth-flow]: ADOBE_IMS_CLIENT_ID=test-client activates IMS_OAUTH_ENABLED auth guard in smoke tests
+- [Phase 02-auth-flow]: pendingOAuthStates keyed by IMS state param (random hex) not session UUID — prevents session fixation; session UUID travels inside pending state value
+- [Phase 02-auth-flow]: 401 responses generate fresh uuidv4 sessionId per request — never derive from incoming Authorization header
+- [Phase 02-auth-flow]: publicUrl resolved as: process.env.PUBLIC_URL ?? http://localhost:${activePort} — single pattern across all route handlers
 
 ### Pending Todos
 
@@ -85,6 +89,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T20:24:23.746Z
-Stopped at: Completed 02-auth-flow-02-01-PLAN.md
+Last session: 2026-03-14T22:45:27.597Z
+Stopped at: Completed 02-auth-flow-02-02-PLAN.md
 Resume file: None
