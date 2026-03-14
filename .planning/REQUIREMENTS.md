@@ -95,12 +95,38 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| HOST-01 to HOST-05 | Phase 3: Deploy | Pending |
-| DNS-01 to DNS-04 | Phase 3: Deploy | Pending |
-| AUTH-01 to AUTH-06 | Phase 2: Auth Flow | Pending |
-| DA-01 to DA-06 | Phase 2: Auth Flow | Pending |
-| HLX-01 to HLX-08 | Phase 1: Foundation | Pending |
-| OB-01 to OB-03 | Phase 4: Validate | Pending |
+| HOST-02 | Phase 1: Foundation | Pending |
+| HOST-03 | Phase 1: Foundation | Pending |
+| HOST-04 | Phase 1: Foundation | Pending |
+| HOST-05 | Phase 1: Foundation | Pending |
+| AUTH-01 | Phase 2: Auth Flow | Pending |
+| AUTH-02 | Phase 2: Auth Flow | Pending |
+| AUTH-03 | Phase 2: Auth Flow | Pending |
+| AUTH-04 | Phase 2: Auth Flow | Pending |
+| AUTH-05 | Phase 2: Auth Flow | Pending |
+| AUTH-06 | Phase 2: Auth Flow | Pending |
+| DA-05 | Phase 2: Auth Flow | Pending |
+| HOST-01 | Phase 3: Deploy & DNS | Pending |
+| DNS-01 | Phase 3: Deploy & DNS | Pending |
+| DNS-02 | Phase 3: Deploy & DNS | Pending |
+| DNS-03 | Phase 3: Deploy & DNS | Pending |
+| DNS-04 | Phase 3: Deploy & DNS | Pending |
+| DA-01 | Phase 4: Validate & Ship | Pending |
+| DA-02 | Phase 4: Validate & Ship | Pending |
+| DA-03 | Phase 4: Validate & Ship | Pending |
+| DA-04 | Phase 4: Validate & Ship | Pending |
+| DA-06 | Phase 4: Validate & Ship | Pending |
+| HLX-01 | Phase 4: Validate & Ship | Pending |
+| HLX-02 | Phase 4: Validate & Ship | Pending |
+| HLX-03 | Phase 4: Validate & Ship | Pending |
+| HLX-04 | Phase 4: Validate & Ship | Pending |
+| HLX-05 | Phase 4: Validate & Ship | Pending |
+| HLX-06 | Phase 4: Validate & Ship | Pending |
+| HLX-07 | Phase 4: Validate & Ship | Pending |
+| HLX-08 | Phase 4: Validate & Ship | Pending |
+| OB-01 | Phase 4: Validate & Ship | Pending |
+| OB-02 | Phase 4: Validate & Ship | Pending |
+| OB-03 | Phase 4: Validate & Ship | Pending |
 
 **Coverage:**
 - v1 requirements: 31 total
@@ -109,4 +135,4 @@
 
 ---
 *Requirements defined: 2026-03-14*
-*Last updated: 2026-03-14 after initial definition*
+*Last updated: 2026-03-14 — traceability updated after roadmap creation*
