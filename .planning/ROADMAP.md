@@ -45,7 +45,12 @@ Plans:
   3. Completing the IMS login redirects to `/callback`, exchanges the code for an IMS token, and stores it in the in-memory session Map under the session UUID
   4. All OAuth callback and discovery endpoints use `PUBLIC_URL` env var — no hardcoded `localhost` anywhere in the auth path
   5. `da_login` tool returns a login URL string (not a browser open call) when running in hosted mode
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Create test-phase2.sh smoke test script (AUTH-01, AUTH-02, AUTH-05, DA-05)
+- [ ] 02-02-PLAN.md — Add /login, /callback routes and 401 guard in http.ts; fix PUBLIC_URL (AUTH-01, AUTH-02, AUTH-03, AUTH-04, AUTH-05, AUTH-06)
+- [ ] 02-03-PLAN.md — Add httpMode branch to da_login in tools.ts (DA-05)
 
 ### Phase 3: Deploy & DNS
 **Goal**: `https://mcp.aemxsc.com` is live, serving the MCP server over HTTPS with Railway health checks passing and TLS cert issued
@@ -78,6 +83,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 3/3 | Complete   | 2026-03-14 |
-| 2. Auth Flow | 0/TBD | Not started | - |
+| 2. Auth Flow | 0/3 | Not started | - |
 | 3. Deploy & DNS | 0/TBD | Not started | - |
 | 4. Validate & Ship | 0/TBD | Not started | - |
