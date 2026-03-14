@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-foundation-01-02-PLAN.md
-last_updated: "2026-03-14T19:27:28Z"
+stopped_at: Completed 01-foundation-01-03-PLAN.md
+last_updated: "2026-03-14T19:31:35.984Z"
 last_activity: "2026-03-14 — Plan 01-02 complete: railway.toml + test-phase1.sh smoke test script"
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
-  completed_plans: 2
+  completed_plans: 3
   percent: 67
 ---
 
@@ -51,6 +51,7 @@ Progress: [██████░░░░] 67%
 
 *Updated after each plan completion*
 | Phase 01-foundation P01 | 3 | 3 tasks | 1 files |
+| Phase 01-foundation P03 | 3 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -67,6 +68,7 @@ Recent decisions affecting current work:
 - [Phase 01-foundation]: C:\Program Files\Git\.well-known routes use http;\localhost;3000 placeholder — Phase 2 replaces with process.env.PUBLIC_URL
 - [Phase 01-foundation]: railway.toml placed inside tools/hlx-admin-mcp/ — Railway Root Directory must be set to tools/hlx-admin-mcp/ in dashboard (Phase 3 task)
 - [Phase 01-foundation]: test-phase1.sh uses PORT=9999 for smoke checks — avoids conflict with dev server on 3000
+- [Phase 01-foundation]: selfsigned removed via npm uninstall — updates both package.json and lockfile atomically
 
 ### Pending Todos
 
@@ -80,6 +82,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-14T19:27:28Z
-Stopped at: Completed 01-foundation-01-02-PLAN.md
+Last session: 2026-03-14T19:31:35.981Z
+Stopped at: Completed 01-foundation-01-03-PLAN.md
 Resume file: None

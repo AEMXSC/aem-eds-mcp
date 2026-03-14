@@ -12,7 +12,7 @@ The existing `tools/hlx-admin-mcp/` codebase is a working MCP server with 16 AEM
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Foundation** - Fix the three code blockers that prevent any Railway deployment from working
+- [x] **Phase 1: Foundation** - Fix the three code blockers that prevent any Railway deployment from working (completed 2026-03-14)
 - [ ] **Phase 2: Auth Flow** - Wire OAuth PKCE for a single hosted server with server-side sessions
 - [ ] **Phase 3: Deploy & DNS** - Create Railway service, configure Cloudflare DNS, verify mcp.aemxsc.com live
 - [ ] **Phase 4: Validate & Ship** - End-to-end MCP client test, freeze deployment, distribute onboarding doc
@@ -77,7 +77,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 2/3 | In Progress|  |
+| 1. Foundation | 3/3 | Complete   | 2026-03-14 |
 | 2. Auth Flow | 0/TBD | Not started | - |
 | 3. Deploy & DNS | 0/TBD | Not started | - |
 | 4. Validate & Ship | 0/TBD | Not started | - |
