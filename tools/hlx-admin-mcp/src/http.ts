@@ -184,8 +184,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // ─── OAuth Discovery ─────────────────────────────────────────────────────────
 
 app.get("/.well-known/oauth-authorization-server", (_req: Request, res: Response) => {
+  // TODO Phase 2: replace with process.env.PUBLIC_URL
+  const oauthBase = "http://localhost:3000";
   const mcpBase = `http://localhost:${activePort}`;
-  const oauthBase = `https://localhost:${OAUTH_PORT}`;
   res.json({
     issuer: oauthBase,
     authorization_endpoint: `${oauthBase}/authorize`,
@@ -194,212 +195,17 @@ app.get("/.well-known/oauth-authorization-server", (_req: Request, res: Response
     grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
     scopes_supported: ["openid", "AdobeID"],
-    // MCP resource server is on plain HTTP
     resource: mcpBase,
   });
 });
 
 app.get("/.well-known/oauth-protected-resource", (_req: Request, res: Response) => {
-  const oauthBase = `https://localhost:${OAUTH_PORT}`;
+  // TODO Phase 2: replace with process.env.PUBLIC_URL
+  const oauthBase = "http://localhost:3000";
   res.json({
     resource: `http://localhost:${activePort}`,
     authorization_servers: [oauthBase],
     scopes_supported: ["openid", "AdobeID"],
-  });
-});
-
-// ─── HTTPS OAuth app (separate server on OAUTH_PORT) ─────────────────────────
-// Adobe IMS requires HTTPS redirect URIs. The OAuth endpoints run on a
-// self-signed HTTPS server while the MCP endpoint stays on plain HTTP.
-
-const oauthApp = express();
-oauthApp.use(express.urlencoded({ extended: false }));
-oauthApp.use(express.json());
-oauthApp.use((_req: Request, res: Response, next: NextFunction) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
-  if (_req.method === "OPTIONS") { res.status(204).end(); return; }
-  next();
-});
-
-// Trust-prompt page — user visits https://localhost:3443 once to accept cert
-oauthApp.get("/", (_req: Request, res: Response) => {
-  res.send(
-    `<html><body style="font-family:sans-serif;padding:2rem;max-width:600px">` +
-    `<h2>hlx-admin OAuth Server</h2>` +
-    `<p>✅ Self-signed certificate accepted. You can close this tab.</p>` +
-    `<p>Return to Claude Code and reconnect to start the Adobe login flow.</p>` +
-    `</body></html>`
-  );
-});
-
-// ─── OAuth /authorize ─────────────────────────────────────────────────────────
-
-oauthApp.get("/authorize", (req: Request, res: Response) => {
-  const {
-    response_type,
-    redirect_uri,
-    code_challenge,
-    code_challenge_method,
-    state,
-  } = req.query as Record<string, string>;
-
-  if (response_type !== "code") {
-    res.status(400).json({ error: "unsupported_response_type" });
-    return;
-  }
-  if (!redirect_uri || !code_challenge || !state) {
-    res.status(400).json({ error: "invalid_request", error_description: "Missing required params" });
-    return;
-  }
-  if (code_challenge_method && code_challenge_method !== "S256") {
-    res.status(400).json({ error: "invalid_request", error_description: "Only S256 supported" });
-    return;
-  }
-
-  // Generate PKCE for the IMS leg (separate from Claude Code's PKCE)
-  const imsCodeVerifier = generateCodeVerifier();
-  const imsCodeChallenge = generateCodeChallenge(imsCodeVerifier);
-  const imsState = randomBytes(16).toString("hex");
-
-  // Store the mapping so /callback can find it
-  pendingOAuthStates.set(imsState, {
-    claudeRedirectUri: redirect_uri,
-    claudeCodeChallenge: code_challenge,
-    claudeState: state,
-    imsCodeVerifier,
-    createdAt: Date.now(),
-  });
-
-  // Build IMS authorization URL
-  const imsAuthUrl = new URL(`${IMS_BASE}/ims/authorize/v2`);
-  imsAuthUrl.searchParams.set("client_id", IMS_CLIENT_ID!);
-  imsAuthUrl.searchParams.set("redirect_uri", OAUTH_CALLBACK_URI);
-  imsAuthUrl.searchParams.set("response_type", "code");
-  imsAuthUrl.searchParams.set("scope", "openid AdobeID additional_info.roles");
-  imsAuthUrl.searchParams.set("state", imsState);
-  imsAuthUrl.searchParams.set("code_challenge", imsCodeChallenge);
-  imsAuthUrl.searchParams.set("code_challenge_method", "S256");
-
-  process.stderr.write(`[oauth] Redirecting to IMS. ims_state=${imsState}\n`);
-  res.redirect(302, imsAuthUrl.toString());
-});
-
-// ─── OAuth /callback (from Adobe IMS) ────────────────────────────────────────
-
-oauthApp.get("/callback", async (req: Request, res: Response) => {
-  const { code, state: imsState, error } = req.query as Record<string, string>;
-
-  const pending = pendingOAuthStates.get(imsState);
-  if (!pending) {
-    res.status(400).send(
-      `<html><body style="font-family:sans-serif;padding:2rem">` +
-      `<h2>Authentication Error</h2>` +
-      `<p>Unknown or expired state. Please try connecting again.</p>` +
-      `</body></html>`
-    );
-    return;
-  }
-
-  pendingOAuthStates.delete(imsState);
-
-  if (error || !code) {
-    // Redirect to Claude Code with error
-    const errUrl = new URL(pending.claudeRedirectUri);
-    errUrl.searchParams.set("error", error ?? "access_denied");
-    errUrl.searchParams.set("state", pending.claudeState);
-    res.redirect(302, errUrl.toString());
-    return;
-  }
-
-  // Exchange IMS code for IMS token
-  let imsTokenData: { access_token: string; refresh_token?: string; expires_in: number };
-  try {
-    imsTokenData = await exchangeCodeForToken(
-      IMS_CLIENT_ID!,
-      code,
-      pending.imsCodeVerifier,
-      OAUTH_CALLBACK_URI
-    );
-  } catch (err) {
-    process.stderr.write(`[oauth] IMS token exchange failed: ${err}\n`);
-    const errUrl = new URL(pending.claudeRedirectUri);
-    errUrl.searchParams.set("error", "server_error");
-    errUrl.searchParams.set("state", pending.claudeState);
-    res.redirect(302, errUrl.toString());
-    return;
-  }
-
-  // Generate our auth code to give to Claude Code
-  const ourAuthCode = uuidv4();
-  authCodes.set(ourAuthCode, {
-    imsToken: imsTokenData.access_token,
-    imsRefreshToken: imsTokenData.refresh_token,
-    imsExpiresAt: Date.now() + imsTokenData.expires_in * 1000,
-    claudeRedirectUri: pending.claudeRedirectUri,
-    claudeCodeChallenge: pending.claudeCodeChallenge,
-    claudeState: pending.claudeState,
-    createdAt: Date.now(),
-  });
-
-  process.stderr.write(`[oauth] IMS auth complete. Redirecting back to Claude Code.\n`);
-
-  // Redirect to Claude Code's redirect_uri with our auth code
-  const claudeCallbackUrl = new URL(pending.claudeRedirectUri);
-  claudeCallbackUrl.searchParams.set("code", ourAuthCode);
-  claudeCallbackUrl.searchParams.set("state", pending.claudeState);
-  res.redirect(302, claudeCallbackUrl.toString());
-});
-
-// ─── OAuth /token ─────────────────────────────────────────────────────────────
-
-oauthApp.post("/token", async (req: Request, res: Response) => {
-  const {
-    grant_type,
-    code,
-    code_verifier,
-  } = req.body as Record<string, string>;
-
-  if (grant_type !== "authorization_code") {
-    res.status(400).json({ error: "unsupported_grant_type" });
-    return;
-  }
-  if (!code || !code_verifier) {
-    res.status(400).json({ error: "invalid_request", error_description: "Missing code or code_verifier" });
-    return;
-  }
-
-  const authCode = authCodes.get(code);
-  if (!authCode) {
-    res.status(400).json({ error: "invalid_grant", error_description: "Unknown or expired auth code" });
-    return;
-  }
-
-  // Verify PKCE
-  if (!verifyPkce(code_verifier, authCode.claudeCodeChallenge)) {
-    res.status(400).json({ error: "invalid_grant", error_description: "PKCE verification failed" });
-    return;
-  }
-
-  authCodes.delete(code);
-
-  // Create session
-  const sessionToken = uuidv4();
-  sessions.set(sessionToken, {
-    imsToken: authCode.imsToken,
-    imsRefreshToken: authCode.imsRefreshToken,
-    imsExpiresAt: authCode.imsExpiresAt,
-    clientId: IMS_CLIENT_ID!,
-    createdAt: Date.now(),
-  });
-
-  process.stderr.write(`[oauth] Session created. token=${sessionToken.slice(0, 8)}...\n`);
-
-  res.json({
-    access_token: sessionToken,
-    token_type: "Bearer",
-    expires_in: 86400,
   });
 });
 
@@ -542,25 +348,6 @@ async function tryListen(port: number): Promise<boolean> {
   });
 }
 
-async function startOAuthHttpsServer(): Promise<void> {
-  // Auto-generate self-signed cert for localhost
-  const pems = await (selfsigned.generate(
-    [{ name: "commonName", value: "localhost" }],
-    { keySize: 2048 }
-  ) as unknown as Promise<{ private: string; cert: string }>);
-
-  return new Promise((resolve, reject) => {
-    const httpsServer = createHttpsServer({ key: pems.private, cert: pems.cert }, oauthApp);
-    httpsServer.listen(OAUTH_PORT, "127.0.0.1", () => {
-      process.stderr.write(`[hlx-admin-mcp] OAuth HTTPS server on https://localhost:${OAUTH_PORT}\n`);
-      resolve();
-    });
-    httpsServer.on("error", (err: NodeJS.ErrnoException) => {
-      reject(new Error(`OAuth HTTPS server failed on port ${OAUTH_PORT}: ${err.message}`));
-    });
-  });
-}
-
 async function main() {
   // Start MCP HTTP server
   for (let port = BASE_PORT; port <= BASE_PORT + 10; port++) {
@@ -578,26 +365,10 @@ async function main() {
     ? "OAuth User Auth (Adobe IMS via HTTPS callback)"
     : "AEM CLI login (call da_login tool with org + site to authenticate)";
 
-  if (IMS_OAUTH_ENABLED) {
-    // Start HTTPS OAuth server for IMS callback
-    try {
-      await startOAuthHttpsServer();
-    } catch (err) {
-      process.stderr.write(`[hlx-admin-mcp] WARNING: ${err}\n`);
-      process.stderr.write(`[hlx-admin-mcp] IMS OAuth browser flow will not work without the HTTPS server.\n`);
-    }
-  }
-
   process.stderr.write(
     `\n[hlx-admin-mcp] HTTP MCP server v${SERVER_VERSION} ready\n` +
     `[hlx-admin-mcp] MCP endpoint:    http://localhost:${activePort}/mcp\n` +
     `[hlx-admin-mcp] Auth mode:       ${mode}\n` +
-    (IMS_CLIENT_ID ? `[hlx-admin-mcp] IMS Client ID:   ${IMS_CLIENT_ID}\n` : "") +
-    (IMS_OAUTH_ENABLED ?
-      `[hlx-admin-mcp] OAuth callback:  ${OAUTH_CALLBACK_URI}\n` +
-      `[hlx-admin-mcp] ⚠️  First run: visit https://localhost:${OAUTH_PORT} in your browser\n` +
-      `[hlx-admin-mcp]    and accept the self-signed certificate warning once.\n` : ""
-    ) +
     `[hlx-admin-mcp] Health check:    http://localhost:${activePort}/health\n\n`
   );
 }
