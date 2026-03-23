@@ -10,6 +10,7 @@ Full technical knowledge for building, configuring, and automating AEM EDS demo 
 
 ```
 New XSC demo — need both DA + UE?      → aemdemos/ise-boilerplate (the standard)
+ExMod Agent + UE in-context editing?   → aem-block-collection-xwalk (required for ExMod AEM Authoring)
 Quick XSC "door opener" demo?           → AdobeDevXSC/dev-xsc-boilerplate
 Need experimentation pre-wired?         → adobe/aem-experimentation-boilerplate
 EDS + Universal Editor (UE/XWalk)?      → adobe-rnd/aem-boilerplate-xwalk
@@ -24,6 +25,7 @@ Vertical demo already built?            → Check AdobeDevXSC or aemdemos/summit
 | Repo | Purpose | Use When |
 |---|---|---|
 | `aemdemos/ise-boilerplate` | **Standard for ALL new projects.** DA + UE dual authoring, design tokens, agents support, AGENTS.md built in | Any new demo site or POC |
+| `aem-block-collection-xwalk` | **#2 baseline — ExMod AEM Authoring.** Required template for Experience Modernization Agent UE in-context editing flow; pairs with AEM Code Connector GitHub app | ExMod demos, migration projects needing WYSIWYG UE editing in AEM Cloud Service |
 | `AdobeDevXSC/dev-xsc-boilerplate` | "Door Opener Boilerplate" — XSC team's own EDS starter, pre-wired with experimentation + sidekick tools | Quick discovery-stage demos; fastest to first preview |
 | `adobe/aem-experimentation-boilerplate` | Pre-wired A/B experimentation + sidekick UI rail | Any demo where experimentation is a story |
 | `adobe-rnd/aem-boilerplate-xwalk` | UE/XWalk template — requires AEM Cloud Service 2024.8+ | When customer wants WYSIWYG in-context editing |
