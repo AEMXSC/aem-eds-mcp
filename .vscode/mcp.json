@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "da-prod-mcp": {
+      "url": "https://mcp.adobeaemcloud.com/adobe/mcp/da"
+    },
+    "fluffyjaws": {
+      "url": "https://fluffyjaws.adobe.com/api/v1/mcp"
+    }
+  }
+}
