@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Navigation Orchestrator Final Output",
+  "description": "Strict aggregate output. No free text in intermediate steps.",
+  "type": "object",
+  "required": ["headerStructure", "desktopMapping", "mobileMapping", "megamenuMapping", "validationReport", "status"],
+  "properties": {
+    "headerStructure": {
+      "type": "object",
+      "description": "From desktop-navigation-agent after Checkpoint 1 and 2 validation"
+    },
+    "desktopMapping": {
+      "type": "object",
+      "description": "From desktop-navigation-agent structured JSON"
+    },
+    "mobileMapping": {
+      "type": "object",
+      "description": "From mobile-navigation-agent structured JSON"
+    },
+    "megamenuMapping": {
+      "type": "object",
+      "description": "From megamenu-analysis-agent; must include triggerType, columnCount, hasImages, hasBlockStructure, nestedLevels, animationType"
+    },
+    "validationReport": {
+      "type": "object",
+      "description": "From validation-agent; invokes excat-page-critique when applicable"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["PASS", "FAIL"],
+      "description": "PASS only when all checkpoints and validation-agent report PASS"
+    }
+  }
+}

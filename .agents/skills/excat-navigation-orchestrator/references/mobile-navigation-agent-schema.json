@@ -1,0 +1,147 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Mobile Navigation Agent Output",
+  "description": "Strict schema for mobile-navigation-agent. Includes hamburger animation, accordion behavior, overlay behavior, mobile menu structure, and content coverage analysis. Output MUST validate against this schema.",
+  "type": "object",
+  "required": [
+    "breakpointPx",
+    "menuTrigger",
+    "hamburgerAnimation",
+    "openBehavior",
+    "mobileMenuLayout",
+    "menuItemsWidthLayout",
+    "accordionBehavior",
+    "overlayBehavior",
+    "tapVsHover",
+    "nestedBehavior",
+    "hasMegamenuOnMobile",
+    "hasSearchForm",
+    "hasLocaleSelector",
+    "confidence",
+    "uncertainty",
+    "notes"
+  ],
+  "properties": {
+    "breakpointPx": { "type": "integer", "minimum": 0, "description": "Width (px) at which mobile layout applies" },
+    "menuTrigger": { "type": "string", "description": "e.g. hamburger, icon, button, breadcrumb" },
+    "hamburgerAnimation": {
+      "type": "object",
+      "description": "Animation behavior when hamburger icon is clicked (hamburger → cross transition)",
+      "required": ["type", "method", "reverseOnClose"],
+      "properties": {
+        "type": { "type": "string", "enum": ["morph-to-cross", "icon-swap", "fade-crossfade", "none"], "description": "Type of animation" },
+        "method": { "type": "string", "enum": ["css-transform", "svg-morph", "class-swap", "opacity-crossfade", "none"], "description": "CSS/JS implementation method" },
+        "transition": { "type": "string", "description": "CSS transition property, e.g. 'transform 0.3s ease'" },
+        "reverseOnClose": { "type": "boolean", "description": "True if closing reverses the animation (cross → hamburger)" },
+        "cssSelector": { "type": "string", "description": "CSS selector for the hamburger element, e.g. '.nav-hamburger span'" }
+      }
+    },
+    "openBehavior": { "type": "string", "enum": ["drawer", "accordion", "fullscreen", "dropdown", "slide-in-panel"], "description": "How the mobile menu opens. slide-in-panel = clicking a category slides main menu out and brings a sub-panel from the right with a back button" },
+    "mobileMenuLayout": { "type": "string", "enum": ["vertical-accordion", "horizontal-accordion", "stacked-list", "tabbed", "drawer-list", "slide-in-subpanel"], "description": "Layout pattern of the open mobile menu. slide-in-subpanel = hierarchical panels that slide left/right on category click with back navigation" },
+    "menuItemsWidthLayout": { "type": "string", "enum": ["full-width-flush", "centered-with-margins", "constrained-max-width", "unknown"], "description": "REQUIRED for visual parity. Whether top-level menu items span the full width of the menu/drawer (flush to left/right edges) or are centered/constrained. full-width-flush = items stretch edge-to-edge (no side margins); centered-with-margins = items have horizontal margins and may appear centered; constrained-max-width = items have a max-width. Observe on SOURCE at mobile viewport; migrated CSS must match (e.g. avoid desktop flex/justify rules without a mobile override that restores full-width)." },
+    "accordionBehavior": {
+      "type": "object",
+      "description": "Accordion-specific behavior (required if openBehavior involves accordions)",
+      "required": ["expandMode", "hasChevronIcons", "animationType"],
+      "properties": {
+        "expandMode": { "type": "string", "enum": ["single", "multi", "none"], "description": "single = one section at a time, multi = multiple open simultaneously" },
+        "hasChevronIcons": { "type": "boolean", "description": "True if menu items have chevron/arrow indicators" },
+        "chevronAnimates": { "type": "boolean", "description": "True if chevron rotates on expand/collapse" },
+        "animationType": { "type": "string", "enum": ["slide-down", "fade", "none"], "description": "Animation type for expand/collapse" },
+        "animationDuration": { "type": "string", "description": "e.g. '0.3s', '300ms'" }
+      }
+    },
+    "slideInPanelBehavior": {
+      "type": "object",
+      "description": "Slide-in sub-panel behavior (required if openBehavior is slide-in-panel). Clicking a category slides the entire main menu out to the left and brings a new sub-panel from the right with a back button.",
+      "required": ["direction", "hasBackButton", "backButtonLabel", "transitionType"],
+      "properties": {
+        "direction": { "type": "string", "enum": ["left-to-right", "right-to-left"], "description": "Direction main menu exits (left-to-right = main slides left, sub enters from right)" },
+        "hasBackButton": { "type": "boolean", "description": "True if sub-panel has a back/return button" },
+        "backButtonLabel": { "type": "string", "description": "Text on back button, e.g. '← Products' or 'Back'" },
+        "backButtonFormat": { "type": "string", "enum": ["arrow-label", "icon-only", "text-only", "chevron-label"], "description": "Format of the back button" },
+        "transitionType": { "type": "string", "enum": ["css-transform-translateX", "css-animation", "js-animation"], "description": "How the slide transition is implemented" },
+        "transitionDuration": { "type": "string", "description": "e.g. '0.3s', '300ms'" },
+        "panelDepth": { "type": "integer", "minimum": 1, "description": "Max nesting depth (1 = single sub-panel, 2 = sub-sub-panel, etc.)" },
+        "preservesScrollPosition": { "type": "boolean", "description": "True if navigating back restores scroll position" }
+      }
+    },
+    "overlayBehavior": {
+      "type": "object",
+      "description": "Backdrop/overlay behavior when mobile menu is open",
+      "required": ["hasOverlay"],
+      "properties": {
+        "hasOverlay": { "type": "boolean", "description": "True if a backdrop overlay appears when menu is open" },
+        "overlayType": { "type": "string", "enum": ["semi-transparent-black", "semi-transparent-white", "blur", "none"], "description": "Type of overlay" },
+        "overlayOpacity": { "type": "string", "description": "Opacity value, e.g. '0.5'" },
+        "overlayDismissesOnTap": { "type": "boolean", "description": "True if tapping overlay closes the menu" }
+      }
+    },
+    "tapVsHover": { "type": "string", "description": "On mobile: tap, hover, or both" },
+    "nestedBehavior": { "type": "string", "description": "How nested items (megamenu content) appear on mobile" },
+    "hasMegamenuOnMobile": { "type": "boolean", "description": "Whether megamenu/multi-column content appears on mobile" },
+    "mobileMenuItems": {
+      "type": "array",
+      "description": "Per-item analysis of top-level mobile menu items. MANDATORY: test split-link pattern (text area vs arrow/chevron) for each item.",
+      "items": {
+        "type": "object",
+        "required": ["label", "expandMode", "splitLinkPattern"],
+        "properties": {
+          "label": { "type": "string" },
+          "expandMode": { "type": "string", "enum": ["accordion", "navigate", "sub-panel", "slide-in", "none"] },
+          "splitLinkPattern": {
+            "type": "object",
+            "description": "MANDATORY. Mobile nav items often have TWO clickable areas: text (navigates) and arrow/chevron (expands). Test BOTH on source and migrated.",
+            "required": ["textClickBehavior", "chevronClickBehavior"],
+            "properties": {
+              "textClickBehavior": { "type": "string", "enum": ["navigate", "expand", "none", "same-as-chevron"], "description": "What happens when clicking the TEXT area: navigate = goes to URL, expand = opens sub-menu/accordion, none = not clickable, same-as-chevron = both areas do the same" },
+              "chevronClickBehavior": { "type": "string", "enum": ["expand", "navigate", "none", "no-chevron"], "description": "What happens when clicking the ARROW/CHEVRON: expand = opens sub-menu/accordion, navigate = goes to URL, none = not clickable, no-chevron = item has no separate chevron" }
+            }
+          },
+          "hasChildren": { "type": "boolean" },
+          "childCount": { "type": "integer", "minimum": 0 },
+          "preservesImages": { "type": "boolean", "description": "True if desktop images are shown on mobile too" },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "contentCoverage": {
+      "type": "object",
+      "description": "Comparison of desktop vs mobile content accessibility",
+      "properties": {
+        "desktopItemCount": { "type": "integer", "minimum": 0 },
+        "mobileItemCount": { "type": "integer", "minimum": 0 },
+        "missingOnMobile": { "type": "array", "items": { "type": "string" } },
+        "notes": { "type": "string" }
+      }
+    },
+    "hasSearchForm": { "type": "boolean", "description": "True if the mobile header or mobile menu contains a search bar, search input, or <form> element for site search. On mobile, search may be hidden behind a search icon, inside the hamburger menu, or collapsed into an expandable input." },
+    "searchFormDetails": {
+      "type": "object",
+      "description": "Details about the mobile search form (required when hasSearchForm is true)",
+      "properties": {
+        "formType": { "type": "string", "enum": ["inline-input", "expandable-icon", "inside-menu", "modal-overlay", "hidden"], "description": "How search appears on mobile: always visible, icon expands on tap, inside the hamburger menu drawer, opens a modal, or hidden/absent on mobile" },
+        "visibleInClosedState": { "type": "boolean", "description": "True if the search form/icon is visible when the mobile menu is closed" },
+        "inputPlaceholder": { "type": "string", "description": "Placeholder text in the search input" },
+        "position": { "type": "string", "description": "Where the search appears, e.g. 'top of mobile menu', 'right of hamburger icon', 'below nav headings'" }
+      }
+    },
+    "hasLocaleSelector": { "type": "boolean", "description": "True if the mobile header or mobile menu contains a locale/language/region selector. On mobile, it may appear as a globe icon, flag icon, language toggle, inside the hamburger menu, or at the bottom of the mobile drawer." },
+    "localeSelectorDetails": {
+      "type": "object",
+      "description": "Details about the mobile locale/language selector (required when hasLocaleSelector is true)",
+      "properties": {
+        "selectorType": { "type": "string", "enum": ["language-dropdown", "country-grid", "region-dropdown", "language-toggle", "flag-dropdown", "globe-icon-dropdown", "inside-menu", "inline-links"], "description": "How the locale selector appears on mobile" },
+        "triggerElement": { "type": "string", "description": "What the user taps to open the selector, e.g. 'globe icon', 'flag + language code'" },
+        "visibleInClosedState": { "type": "boolean", "description": "True if the locale selector/icon is visible when the mobile menu is closed" },
+        "hasFlags": { "type": "boolean", "description": "True if entries show flag icons. Flags MUST be downloaded and referenced in nav.plain.html." },
+        "position": { "type": "string", "description": "Where the selector appears on mobile, e.g. 'top of mobile menu', 'bottom of drawer', 'next to hamburger'" },
+        "dropdownLayout": { "type": "string", "enum": ["vertical-list", "multi-column-grid", "full-screen-overlay", "tooltip-bubble", "inline-toggle"], "description": "Layout of the opened selector on mobile" }
+      }
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "uncertainty": { "type": "boolean" },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

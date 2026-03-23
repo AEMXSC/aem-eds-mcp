@@ -1,0 +1,7 @@
+{
+  "type": "module",
+  "dependencies": {
+    "playwright": "^1.58.2",
+    "sharp": "^0.33.0"
+  }
+}

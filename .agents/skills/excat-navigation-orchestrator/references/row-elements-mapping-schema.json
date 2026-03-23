@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Row Elements Mapping (Desktop Header)",
+  "description": "Per-element hover and click behavior for every header row element (logo, nav links, CTA, search, locale selector, hamburger, icons, etc.). Each element must be individually hovered and clicked on source (and later on migrated) to record behavior. Covers ALL rows and ALL elements within each row — not just main nav headings.",
+  "type": "object",
+  "required": ["rows", "totalElementsAnalyzed", "confidence", "notes"],
+  "properties": {
+    "rows": {
+      "type": "array",
+      "description": "One entry per header row. Each row contains every distinct element that was tested for hover and click.",
+      "items": {
+        "type": "object",
+        "required": ["rowIndex", "elements"],
+        "properties": {
+          "rowIndex": { "type": "integer", "minimum": 0 },
+          "elements": {
+            "type": "array",
+            "description": "Every interactive or visible element in this row: logo, nav links container, individual nav links if needed, CTA, search form/icon, locale selector, hamburger icon, icons group, etc.",
+            "items": {
+              "type": "object",
+              "required": ["id", "label", "type", "hoverBehavior", "clickBehavior"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Stable ID for matching source vs migrated, e.g. row-0-logo, row-0-nav-links, row-0-cta, row-0-search, row-0-locale-selector, row-0-hamburger, row-0-icons, row-1-nav-links, row-2-category-tabs"
+                },
+                "label": { "type": "string", "description": "Human-readable label (e.g. 'Logo', 'Main nav', 'Sign In CTA', 'Search icon')" },
+                "type": {
+                  "type": "string",
+                  "enum": ["logo", "nav-links", "nav-link", "cta", "search", "locale-selector", "hamburger", "icons", "breadcrumb", "other"],
+                  "description": "Kind of element"
+                },
+                "hoverBehavior": {
+                  "type": "object",
+                  "required": ["hasEffect", "description"],
+                  "properties": {
+                    "hasEffect": { "type": "boolean", "description": "True if hovering this element produces any visible or interactive effect" },
+                    "description": { "type": "string", "description": "What happens on hover (e.g. 'underline highlight', 'dropdown opens', 'background color change', 'no effect')" }
+                  }
+                },
+                "clickBehavior": {
+                  "type": "object",
+                  "required": ["navigates", "description"],
+                  "properties": {
+                    "navigates": { "type": "boolean", "description": "True if click navigates to a URL" },
+                    "url": { "type": "string", "description": "Destination URL if navigates=true" },
+                    "description": { "type": "string", "description": "What happens on click (e.g. 'navigates to /products', 'opens search overlay', 'opens locale dropdown', 'toggles mobile menu')" },
+                    "opensPanel": { "type": "boolean", "description": "True if click opens a dropdown/panel/overlay" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "totalElementsAnalyzed": { "type": "integer", "minimum": 0 },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  }
+}

@@ -1,0 +1,183 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Megamenu Mapping (Deep Behavior Analysis)",
+  "description": "Per-item deep analysis of every dropdown panel (megamenu = any panel that drops down on hover/click, small or large). Each nav trigger and every item WITHIN each panel must be individually hovered and clicked to record behavior. This includes nested interactions (e.g. hovering a car thumbnail shows zoomed image on the left). Continue drilling until no further interaction is found.",
+  "type": "object",
+  "required": ["navTriggers", "totalItemsAnalyzed", "confidence", "notes"],
+  "properties": {
+    "navTriggers": {
+      "type": "array",
+      "description": "One entry per nav item that opens a dropdown/megamenu panel.",
+      "items": {
+        "type": "object",
+        "required": ["label", "index", "hoverBehavior", "clickBehavior", "panelType", "panelItems"],
+        "properties": {
+          "label": { "type": "string", "description": "Text of the nav trigger (e.g. 'Products', 'Services')" },
+          "index": { "type": "integer", "minimum": 0 },
+          "hoverBehavior": {
+            "type": "object",
+            "required": ["opensPanel", "description"],
+            "properties": {
+              "opensPanel": { "type": "boolean" },
+              "description": { "type": "string", "description": "What happens on hover (e.g. 'opens full-width megamenu with vehicle grid')" },
+              "animationType": { "type": "string" },
+              "delay": { "type": "string", "description": "e.g. 'instant', '200ms'" }
+            }
+          },
+          "clickBehavior": {
+            "type": "object",
+            "required": ["navigates", "description"],
+            "properties": {
+              "navigates": { "type": "boolean" },
+              "url": { "type": "string" },
+              "description": { "type": "string" },
+              "opensPanel": { "type": "boolean" }
+            }
+          },
+          "panelType": { "type": "string", "enum": ["megamenu", "dropdown", "flyout", "none"], "description": "Type of panel that opens" },
+          "panelLayout": { "type": "string", "description": "e.g. 'two-column: featured-image-left + grid-right', 'single-column-list'" },
+          "panelLayoutDetails": {
+            "type": "object",
+            "description": "Structured panel layout for source vs migrated comparison. Required for every nav trigger that opens a panel (dropdown, flyout, or megamenu — any size). MUST include measured values from getBoundingClientRect() and computed CSS — not self-assessed. Test at multiple viewports (1440, 1920, 1366, 1280, 1024px).",
+            "properties": {
+              "viewportContained": { "type": "boolean", "description": "True if panel stays within viewport (no overflow left/right/bottom)" },
+              "widthType": { "type": "string", "enum": ["full-viewport", "aligned-with-content", "below-trigger", "constrained"], "description": "Panel width relation to viewport" },
+              "horizontalAlignment": { "type": "string", "enum": ["left", "center", "right", "full"], "description": "Panel horizontal alignment" },
+              "overlayBehavior": { "type": "string", "enum": ["overlay", "push", "mixed"], "description": "overlay=floats over content; push=reflows; mixed=partial" },
+              "extendsBeyondViewport": { "type": "string", "enum": ["none", "left", "right", "both"], "description": "Does panel extend off-screen?" },
+              "obscuresPageContent": { "type": "string", "enum": ["intentional", "unintentional", "none"], "description": "intentional=source overlays by design; unintentional=wrong; none=no overlay" },
+              "measuredLeft": { "type": "number", "description": "getBoundingClientRect().left — panel left edge in viewport pixels" },
+              "measuredRight": { "type": "number", "description": "getBoundingClientRect().right — panel right edge in viewport pixels" },
+              "measuredWidth": { "type": "number", "description": "getBoundingClientRect().width" },
+              "measuredTop": { "type": "number", "description": "getBoundingClientRect().top" },
+              "measuredBottom": { "type": "number", "description": "getBoundingClientRect().bottom" },
+              "viewportWidth": { "type": "number", "description": "window.innerWidth at time of measurement" },
+              "viewportHeight": { "type": "number", "description": "window.innerHeight at time of measurement" },
+              "cssPosition": { "type": "string", "description": "getComputedStyle(position) — e.g. absolute, fixed" },
+              "cssLeft": { "type": "string", "description": "getComputedStyle(left) — e.g. 0px, 50%" },
+              "cssTop": { "type": "string", "description": "getComputedStyle(top) — e.g. 100%" },
+              "cssWidth": { "type": "string", "description": "getComputedStyle(width) — e.g. 100%, 1440px" },
+              "cssMaxWidth": { "type": "string", "description": "getComputedStyle(max-width)" },
+              "containingBlockSelector": { "type": "string", "description": "Selector of element panel is positioned relative to" },
+              "viewportsTested": {
+                "type": "array",
+                "description": "Per-viewport measurements. Test at 1440, 1920, 1366, 1280, 1024px.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "viewportWidth": { "type": "number" },
+                    "viewportHeight": { "type": "number" },
+                    "measuredLeft": { "type": "number" },
+                    "measuredRight": { "type": "number" },
+                    "contained": { "type": "boolean", "description": "measuredLeft>=0 && measuredRight<=viewportWidth" }
+                  }
+                }
+              }
+            }
+          },
+          "panelItems": {
+            "type": "array",
+            "description": "Every item inside the opened panel. Each must be individually tested for hover and click.",
+            "items": {
+              "type": "object",
+              "required": ["label", "type", "hoverBehavior", "clickBehavior"],
+              "properties": {
+                "label": { "type": "string", "description": "Text or alt text of the item" },
+                "type": { "type": "string", "enum": ["link", "image-card", "image-link", "tab", "category", "promotional", "icon", "button", "other"] },
+                "hasImage": { "type": "boolean" },
+                "imageUrl": { "type": "string", "description": "Source URL of the image if hasImage=true" },
+                "hoverBehavior": {
+                  "type": "object",
+                  "required": ["hasEffect", "description"],
+                  "properties": {
+                    "hasEffect": { "type": "boolean" },
+                    "description": { "type": "string", "description": "e.g. 'hovering shows zoomed image in left featured area', 'highlight border', 'tooltip'" },
+                    "affectsOtherElements": { "type": "boolean", "description": "True if hovering this item changes OTHER elements (e.g. featured image area)" },
+                    "affectedElementDescription": { "type": "string", "description": "What other element changes (e.g. 'left-side featured car image updates to this vehicle')" }
+                  }
+                },
+                "clickBehavior": {
+                  "type": "object",
+                  "required": ["navigates", "description"],
+                  "properties": {
+                    "navigates": { "type": "boolean" },
+                    "url": { "type": "string" },
+                    "description": { "type": "string" }
+                  }
+                },
+                "subItems": {
+                  "type": "array",
+                  "description": "Nested items (e.g. tabs within the panel, category filters). Drill until no more interaction.",
+                  "items": { "$ref": "#/properties/navTriggers/items/properties/panelItems/items" }
+                }
+              }
+            }
+          },
+          "categoryTabs": {
+            "type": "array",
+            "description": "If the panel has category tabs (e.g. TODOS, SUV, HATCHBACK), list each with its behavior.",
+            "items": {
+              "type": "object",
+              "required": ["label", "hoverBehavior", "clickBehavior"],
+              "properties": {
+                "label": { "type": "string" },
+                "hoverBehavior": {
+                  "type": "object",
+                  "properties": {
+                    "hasEffect": { "type": "boolean" },
+                    "description": { "type": "string" }
+                  }
+                },
+                "clickBehavior": {
+                  "type": "object",
+                  "required": ["filtersContent", "description"],
+                  "properties": {
+                    "filtersContent": { "type": "boolean" },
+                    "description": { "type": "string", "description": "e.g. 'filters vehicle grid to show only SUVs'" }
+                  }
+                }
+              }
+            }
+          },
+          "featuredArea": {
+            "type": "object",
+            "description": "If the panel has a featured/hero area (e.g. large car image on the left that changes on hover).",
+            "properties": {
+              "exists": { "type": "boolean" },
+              "type": { "type": "string", "description": "e.g. 'large-vehicle-image', 'promotional-banner', 'specs-carousel'" },
+              "updatesOnHover": { "type": "boolean", "description": "True if the featured area content changes when hovering items in the grid" },
+              "description": { "type": "string" }
+            }
+          },
+          "featureCard": {
+            "type": "object",
+            "description": "Per-trigger feature/promotional card in the panel (e.g. one card per sidebar item with background-image, title, description, link).",
+            "properties": {
+              "exists": { "type": "boolean" },
+              "title": { "type": "string", "description": "Card title text" },
+              "description": { "type": "string", "description": "Card description or caption" },
+              "imageType": { "type": "string", "enum": ["img", "background-image"], "description": "How the image is rendered" },
+              "imageUrl": { "type": "string", "description": "Source URL of the card image" },
+              "linkUrl": { "type": "string", "description": "URL the card links to" },
+              "size": { "type": "string", "description": "e.g. 356x507" },
+              "hasOverlay": { "type": "boolean" },
+              "overlayType": { "type": "string", "description": "e.g. linear-gradient dark" }
+            }
+          },
+          "specDetails": {
+            "type": "object",
+            "description": "If specs/details are shown (e.g. Motor, Transmissão, Potência for vehicles).",
+            "properties": {
+              "exists": { "type": "boolean" },
+              "fields": { "type": "array", "items": { "type": "string" }, "description": "e.g. ['Motor', 'Transmissão', 'Potência máxima', 'Torque máximo']" },
+              "updatesOnHover": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "totalItemsAnalyzed": { "type": "integer", "minimum": 0, "description": "Total number of individual items that were hovered and clicked" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  }
+}

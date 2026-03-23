@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Desktop Navigation Agent Output",
+  "description": "Strict schema for desktop-navigation-agent. Each row MUST include hasImages, hasHoverBehavior, hasClickBehavior from evidence. Test hover and click separately; nav items that are links can still have hover (e.g. dropdown).",
+  "oneOf": [
+    {
+      "title": "rowDetection",
+      "type": "object",
+      "required": ["rowCount", "confidence", "uncertainty", "notes"],
+      "properties": {
+        "rowCount": { "type": "integer", "minimum": 0 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "uncertainty": { "type": "boolean" },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    {
+      "title": "rowMapping",
+      "type": "object",
+      "required": ["rows", "confidence", "uncertainty", "notes"],
+      "properties": {
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["index", "alignmentGroups", "spacing", "backgroundDifference", "elements", "hasImages", "hasHoverBehavior", "hasClickBehavior", "hasHamburgerIcon", "hasSearchForm", "hasLocaleSelector"],
+            "properties": {
+              "index": { "type": "integer", "minimum": 0 },
+              "alignmentGroups": { "type": "array" },
+              "spacing": { "type": "object" },
+              "backgroundDifference": { "type": "boolean" },
+              "elements": { "type": "array" },
+              "hasImages": { "type": "boolean", "description": "True if this row contains any images (logo, icons, megamenu). Set from screenshot." },
+              "hasHoverBehavior": { "type": "boolean", "description": "True if any element in this row shows behavior on hover (e.g. dropdown, highlight). Test hover on every nav item including links; do not assume links have no hover." },
+              "hasClickBehavior": { "type": "boolean", "description": "True if any element in this row has click behavior (e.g. navigate, toggle). Test click separately from hover." },
+              "hasHamburgerIcon": { "type": "boolean", "description": "True if this row contains a hamburger/breadcrumb/toggle icon. Must click to test animation." },
+              "hamburgerClickBehavior": { "type": "string", "description": "What happens when hamburger icon is clicked (e.g. 'opens mobile drawer', 'toggles nav sections')" },
+              "hamburgerAnimation": { "type": "string", "description": "Animation type when clicked (e.g. 'morphs to × cross with CSS transform', 'icon swap', 'no animation')" },
+              "hasSearchForm": { "type": "boolean", "description": "True if this row contains a search bar, search input, or <form> element used for site search. Check for <input type='search'>, <form> with search action, or a visible search icon+input combo." },
+              "searchFormDetails": {
+                "type": "object",
+                "description": "Details about the search form (required when hasSearchForm is true)",
+                "properties": {
+                  "formType": { "type": "string", "enum": ["inline-input", "expandable-icon", "modal-overlay", "dropdown-panel"], "description": "How the search form appears: always visible input, icon that expands to input on click, opens a modal overlay, or drops down a search panel" },
+                  "inputPlaceholder": { "type": "string", "description": "Placeholder text in the search input, e.g. 'Search...'" },
+                  "hasSubmitButton": { "type": "boolean", "description": "True if there is a visible submit/search button" },
+                  "hasAutocomplete": { "type": "boolean", "description": "True if typing shows autocomplete/suggestions dropdown" },
+                  "position": { "type": "string", "description": "Where the search form sits, e.g. 'right-aligned in row-0', 'center of row-1'" }
+                }
+              },
+              "hasMegamenuInRow": { "type": "boolean", "description": "True if this row contains nav items that open megamenu/dropdown panels. Set from a quick hover test (one trigger); do NOT drill into megamenu content — that is Phase 3. Saves time by deferring full megamenu extraction." },
+              "hasLocaleSelector": { "type": "boolean", "description": "True if this row contains a locale/language/region selector — globe icon, flag icon, country dropdown, language picker, or region switcher. Click it to observe the dropdown/overlay behavior." },
+              "localeSelectorDetails": {
+                "type": "object",
+                "description": "Details about the locale/language selector (required when hasLocaleSelector is true)",
+                "properties": {
+                  "selectorType": { "type": "string", "enum": ["language-dropdown", "country-grid", "region-dropdown", "language-toggle", "flag-dropdown", "globe-icon-dropdown", "inline-links"], "description": "How the locale selector appears: dropdown with language names, full grid/overlay of countries with flags, region selector, toggle between 2 languages, flag-based dropdown, globe icon that opens dropdown, or inline text links" },
+                  "triggerElement": { "type": "string", "description": "What the user clicks to open the selector, e.g. 'globe icon', 'flag icon + country code', 'language name text', 'EN/DE toggle'" },
+                  "triggerBehavior": { "type": "string", "enum": ["click", "hover", "both"], "description": "Does the selector open on click, hover, or both?" },
+                  "hasFlags": { "type": "boolean", "description": "True if country/language entries show flag icons/images. Flags MUST be downloaded to content/images/ and referenced in nav.plain.html." },
+                  "flagCount": { "type": "integer", "minimum": 0, "description": "Number of distinct flag images shown (0 if no flags)" },
+                  "dropdownLayout": { "type": "string", "enum": ["vertical-list", "multi-column-grid", "full-width-overlay", "tooltip-bubble", "inline-toggle"], "description": "Layout of the opened selector" },
+                  "entryCount": { "type": "integer", "minimum": 0, "description": "Number of locale/language/country entries in the selector" },
+                  "currentLocaleIndicator": { "type": "string", "description": "How the current locale is shown, e.g. 'bold text', 'underlined', 'flag icon in header', 'highlighted background'" },
+                  "position": { "type": "string", "description": "Where the selector sits, e.g. 'right end of row-0', 'top-right corner'" },
+                  "closeBehavior": { "type": "string", "description": "How the selector closes, e.g. 'click outside', 'selecting a locale', 'close icon'" }
+                }
+              }
+            }
+          }
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "uncertainty": { "type": "boolean" },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

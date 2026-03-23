@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Row Elements Behavior Register",
+  "description": "Per-element comparison: source row-elements-mapping.json vs migrated-row-elements-mapping.json. Every row element (logo, nav links, CTA, search, locale, hamburger, icons, etc.) must have hoverMatch and clickMatch. allValidated=true ONLY when every element passes both.",
+  "type": "object",
+  "required": ["items", "summary", "allValidated"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "type", "hoverMatch", "clickMatch", "status"],
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "type": { "type": "string" },
+          "hoverMatch": {
+            "type": "object",
+            "required": ["matches", "sourceDescription", "migratedDescription"],
+            "properties": {
+              "matches": { "type": "boolean" },
+              "sourceDescription": { "type": "string" },
+              "migratedDescription": { "type": "string" },
+              "delta": { "type": "string" }
+            }
+          },
+          "clickMatch": {
+            "type": "object",
+            "required": ["matches", "sourceDescription", "migratedDescription"],
+            "properties": {
+              "matches": { "type": "boolean" },
+              "sourceDescription": { "type": "string" },
+              "migratedDescription": { "type": "string" },
+              "sourceUrl": { "type": "string" },
+              "migratedUrl": { "type": "string" },
+              "delta": { "type": "string" }
+            }
+          },
+          "status": { "type": "string", "enum": ["pending", "validated", "failed"] },
+          "remediation": { "type": "string" }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["totalItems", "hoverMatches", "clickMatches", "totalValidated", "totalFailed"],
+      "properties": {
+        "totalItems": { "type": "integer" },
+        "hoverMatches": { "type": "integer" },
+        "clickMatches": { "type": "integer" },
+        "totalValidated": { "type": "integer" },
+        "totalFailed": { "type": "integer" }
+      }
+    },
+    "allValidated": { "type": "boolean" }
+  }
+}

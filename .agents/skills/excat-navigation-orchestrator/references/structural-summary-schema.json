@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Header Structural Summary",
+  "description": "Comparable structure: row count, per-row hasImages, megamenu columnCount/hasImages/columns. Used to compare source (from phase-1/2/3) vs migrated (extracted from migrated page). Same shape for every site; values are site-specific.",
+  "type": "object",
+  "required": ["rowCount", "rows", "megamenu"],
+  "properties": {
+    "rowCount": { "type": "integer", "minimum": 0 },
+    "rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["index", "hasImages"],
+        "properties": {
+          "index": { "type": "integer", "minimum": 0 },
+          "hasImages": { "type": "boolean" },
+          "imageCount": { "type": "integer", "minimum": 0, "description": "Exact count of images in this row" },
+          "imageBreakdown": {
+            "type": "object",
+            "description": "Breakdown by type for comparison",
+            "properties": {
+              "imgTags": { "type": "integer", "minimum": 0 },
+              "svgTags": { "type": "integer", "minimum": 0 },
+              "bgImages": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "megamenu": {
+      "type": "object",
+      "required": ["columnCount", "hasImages", "columns"],
+      "properties": {
+        "columnCount": { "type": "integer", "minimum": 0 },
+        "hasImages": { "type": "boolean" },
+        "imageCount": { "type": "integer", "minimum": 0, "description": "Total image count in megamenu" },
+        "imageBreakdown": {
+          "type": "object",
+          "properties": {
+            "imgTags": { "type": "integer", "minimum": 0 },
+            "svgTags": { "type": "integer", "minimum": 0 },
+            "bgImages": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["columnIndex", "hasImages"],
+            "properties": {
+              "columnIndex": { "type": "integer", "minimum": 0 },
+              "hasImages": { "type": "boolean" },
+              "imageCount": { "type": "integer", "minimum": 0 },
+              "imageBreakdown": {
+                "type": "object",
+                "properties": {
+                  "imgTags": { "type": "integer", "minimum": 0 },
+                  "svgTags": { "type": "integer", "minimum": 0 },
+                  "bgImages": { "type": "integer", "minimum": 0 }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Header Appearance on Interaction",
+  "description": "Captures whether the entire header bar changes appearance (background, shadow, border) when hovering nav items or when a megamenu/panel is open. headerBackgroundBehavior is REQUIRED — documents transparent vs solid behavior for pre-implementation CSS template selection. Source and migrated both capture; compare-header-appearance.js compares.",
+  "type": "object",
+  "required": ["hasChanges", "triggers", "headerBackgroundBehavior"],
+  "properties": {
+    "headerBackgroundBehavior": {
+      "type": "object",
+      "description": "REQUIRED. Documents header background behavior for pre-implementation gate. When defaultState is transparent, CSS must NOT add background-color on .nav-wrapper; use transparent header template.",
+      "required": ["defaultState", "interactionState"],
+      "properties": {
+        "defaultState": {
+          "type": "string",
+          "enum": ["transparent", "solid", "gradient"],
+          "description": "Header background when no interaction. transparent = no solid background (hero overlap); solid = opaque; gradient = gradient overlay."
+        },
+        "interactionState": {
+          "type": "string",
+          "enum": ["solid-white", "solid-colored", "opacity-change", "blur", "none"],
+          "description": "Header background when nav hovered or panel open."
+        },
+        "classToggle": {
+          "type": "object",
+          "properties": {
+            "openClass": { "type": "string" },
+            "closedClass": { "type": "string" }
+          }
+        },
+        "requiresBodyPaddingTop": { "type": "boolean" },
+        "textColorInversion": { "type": "boolean" }
+      }
+    },
+    "hasChanges": {
+      "type": "boolean",
+      "description": "True if header bar appearance changes on hover/click of nav items or when panel is open"
+    },
+    "triggers": {
+      "type": "array",
+      "description": "What interactions cause header appearance to change",
+      "items": {
+        "type": "object",
+        "required": ["trigger", "effect", "description"],
+        "properties": {
+          "trigger": { "type": "string", "enum": ["hover-nav-item", "hover-megamenu-trigger", "megamenu-open", "dropdown-open", "click-nav-item", "other"] },
+          "effect": { "type": "string", "enum": ["background-change", "shadow", "border", "opacity", "color", "combined", "other"] },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "defaultAppearance": {
+      "type": "object",
+      "properties": {
+        "background": { "type": "string" },
+        "shadow": { "type": "string" },
+        "border": { "type": "string" }
+      }
+    },
+    "onInteractionAppearance": {
+      "type": "object",
+      "properties": {
+        "background": { "type": "string" },
+        "shadow": { "type": "string" },
+        "border": { "type": "string" }
+      }
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  }
+}

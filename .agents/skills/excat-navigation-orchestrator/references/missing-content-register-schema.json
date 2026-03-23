@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Missing Content Register",
+  "description": "Records content on the source site that was not yet added to nav.plain.html. Hook blocks until all items are resolved.",
+  "type": "object",
+  "required": ["items"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "description": "List of content omissions. Add an item when you detect source content missing from nav.plain.html. Set resolved: true when you add it to nav.plain.html.",
+      "items": {
+        "type": "object",
+        "required": ["location", "description"],
+        "properties": {
+          "location": {
+            "type": "string",
+            "description": "Where on the source (e.g. 'Concessionárias dropdown', 'row-0-search', 'megamenu-trigger-0-panel')"
+          },
+          "description": {
+            "type": "string",
+            "description": "What is missing (e.g. 'Dealer search form', '2 icon cards (Agendamento de Serviço, Test Drive)')"
+          },
+          "resolved": {
+            "type": "boolean",
+            "default": false,
+            "description": "Set to true when you have added this content to nav.plain.html"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "resolved"],
+            "description": "Alternative to resolved: 'pending' = not yet in nav.plain.html, 'resolved' = added"
+          }
+        }
+      }
+    }
+  }
+}

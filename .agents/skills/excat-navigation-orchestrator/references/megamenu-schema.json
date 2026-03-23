@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Megamenu Analysis Agent Output",
+  "description": "Strict schema for megamenu-analysis-agent. Record both hasHoverBehavior and hasClickBehavior separately (e.g. opens on hover and link on click). hasImages and columns[].hasImages must reflect source.",
+  "type": "object",
+  "required": ["triggerType", "columnCount", "hasImages", "hasHoverBehavior", "hasClickBehavior", "hasBlockStructure", "nestedLevels", "animationType", "hoverOutBehavior", "clickOutBehavior", "promotionalBlocks", "gridStructure", "confidence", "uncertainty", "notes"],
+  "properties": {
+    "triggerType": { "type": "string", "enum": ["hover", "click", "focus", "both", ""], "description": "Primary trigger; use 'both' if hover and click both open/affect megamenu." },
+    "columnCount": { "type": "integer", "minimum": 0 },
+    "hasImages": { "type": "boolean" },
+    "hasHoverBehavior": { "type": "boolean", "description": "True if megamenu or nav item shows any behavior on hover (dropdown, open panel). Test hover on every item including links." },
+    "hasClickBehavior": { "type": "boolean", "description": "True if megamenu or nav item has click behavior (open panel, navigate). Test click separately." },
+    "hasBlockStructure": { "type": "boolean" },
+    "nestedLevels": { "type": "integer", "minimum": 0 },
+    "animationType": { "type": "string" },
+    "hoverOutBehavior": { "type": "string" },
+    "clickOutBehavior": { "type": "string" },
+    "promotionalBlocks": { "type": "boolean" },
+    "gridStructure": { "type": "string" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "uncertainty": { "type": "boolean" },
+    "notes": { "type": "array", "items": { "type": "string" } },
+    "columns": {
+      "type": "array",
+      "description": "Per-column flags. Required when columnCount > 0.",
+      "items": {
+        "type": "object",
+        "required": ["columnIndex", "hasImages"],
+        "properties": {
+          "columnIndex": { "type": "integer", "minimum": 0 },
+          "hasImages": { "type": "boolean" },
+          "label": { "type": "string" }
+        }
+      }
+    },
+    "hasSearchForm": { "type": "boolean", "description": "True if the megamenu panel contains a search bar or search input (some megamenus include a search field within their dropdown). Check for <input type='search'>, <form>, or search icon+input inside the megamenu panel." },
+    "searchFormDetails": {
+      "type": "object",
+      "description": "Details about search form inside megamenu (only when hasSearchForm is true)",
+      "properties": {
+        "position": { "type": "string", "description": "Where the search appears inside the megamenu, e.g. 'top of panel', 'sidebar filter'" },
+        "scope": { "type": "string", "description": "What the search filters, e.g. 'full site search', 'filters megamenu items only'" }
+      }
+    },
+    "hasLocaleSelector": { "type": "boolean", "description": "True if the megamenu panel contains a locale/language/region selector (some megamenus embed a country or region picker within a dropdown panel, e.g. a full country grid with flags)." },
+    "localeSelectorDetails": {
+      "type": "object",
+      "description": "Details about locale selector inside megamenu (only when hasLocaleSelector is true)",
+      "properties": {
+        "selectorType": { "type": "string", "enum": ["country-grid", "language-list", "region-tabs"], "description": "Layout of the locale content inside the megamenu" },
+        "hasFlags": { "type": "boolean", "description": "True if entries show flag icons. Flags MUST be downloaded." },
+        "entryCount": { "type": "integer", "minimum": 0, "description": "Number of locale/country entries" }
+      }
+    },
+    "overlayBehavior": {
+      "type": "object",
+      "description": "Backdrop/overlay behavior when megamenu is open. Must match source exactly — no adding overlays that don't exist in source.",
+      "properties": {
+        "hasOverlay": { "type": "boolean", "description": "True if source shows a background overlay when megamenu opens" },
+        "overlayType": { "type": "string", "enum": ["semi-transparent-black", "semi-transparent-white", "blur", "none"] },
+        "overlayOpacity": { "type": "string", "description": "e.g. '0.5'" },
+        "overlayDismisses": { "type": "boolean", "description": "True if clicking overlay closes megamenu" }
+      }
+    }
+  },
+  "additionalProperties": false
+}

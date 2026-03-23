@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Mobile Missing Content Register",
+  "description": "Records content on the source mobile view that was not in desktop nav.plain.html. Mobile-only items (extra menu items, mobile CTAs, etc.) must be added with CSS that hides them on desktop. Hook blocks until all items are resolved.",
+  "type": "object",
+  "required": ["items"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "description": "List of mobile-only content omissions. Add when Phase 4 analysis finds content on mobile that isn't in nav.plain.html. Set resolved: true when added to nav.plain.html with desktop-hidden styling.",
+      "items": {
+        "type": "object",
+        "required": ["location", "description"],
+        "properties": {
+          "location": {
+            "type": "string",
+            "description": "Where on mobile (e.g. 'mobile menu drawer', 'mobile header bar', 'mobile accordion heading Products')"
+          },
+          "description": {
+            "type": "string",
+            "description": "What is missing (e.g. 'Extra CTA button', 'Mobile-only search icon', 'Additional accordion section')"
+          },
+          "resolved": {
+            "type": "boolean",
+            "default": false,
+            "description": "Set to true when added to nav.plain.html and styled to show only at mobile breakpoint"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "resolved"],
+            "description": "Alternative to resolved: 'pending' = not yet in nav.plain.html, 'resolved' = added with mobile-only styling"
+          }
+        }
+      }
+    }
+  }
+}

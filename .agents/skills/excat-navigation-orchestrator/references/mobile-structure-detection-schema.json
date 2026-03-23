@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Mobile Structure Detection",
+  "description": "Output of detect-mobile-structure.js and shape for migrated-mobile-structural-summary when used for mobile parity. rowCount and rows (items per row); topLevelMenuItemCount when menu is open. Used to compare source vs migrated and to detect when mobile has extra content (add to nav.plain.html mobile-only section).",
+  "type": "object",
+  "required": ["rowCount", "rows", "topLevelMenuItemCount"],
+  "properties": {
+    "viewport": {
+      "type": "object",
+      "properties": { "width": { "type": "integer" }, "height": { "type": "integer" } }
+    },
+    "url": { "type": "string" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "rowCount": { "type": "integer", "minimum": 0 },
+    "rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["index", "itemCount", "hasImages"],
+        "properties": {
+          "index": { "type": "integer", "minimum": 0 },
+          "itemCount": { "type": "integer", "minimum": 0 },
+          "hasImages": { "type": "boolean" }
+        }
+      }
+    },
+    "headerBarRowCount": { "type": "integer", "minimum": 0 },
+    "topLevelMenuItemCount": { "type": "integer", "minimum": 0 },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  }
+}

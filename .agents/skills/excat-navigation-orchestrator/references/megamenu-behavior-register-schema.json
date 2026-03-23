@@ -1,0 +1,91 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Megamenu Behavior Register",
+  "description": "Per-sub-item behavior comparison: source megamenu-mapping.json vs migrated-megamenu-mapping.json. Every nav trigger, every panel item, every sub-item, every category tab, and every featured area must have an entry. Each entry checks hover match, click match, and styling match independently. allValidated=true ONLY when every item passes all three checks.",
+  "type": "object",
+  "required": ["items", "summary", "allValidated"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "type", "hoverMatch", "clickMatch", "stylingMatch", "status"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique ID. Pattern: trigger-{index} for nav triggers, trigger-{i}-item-{j} for panel items, trigger-{i}-item-{j}-sub-{k} for sub-items, trigger-{i}-tab-{j} for tabs, trigger-{i}-featured for featured area."
+          },
+          "label": { "type": "string", "description": "Human-readable label (e.g. 'Products', 'Widget X', 'Category A tab')" },
+          "type": {
+            "type": "string",
+            "enum": ["nav-trigger", "panel-item", "sub-item", "category-tab", "featured-area", "spec-details", "panel-layout"],
+            "description": "What kind of megamenu element this is"
+          },
+          "hoverMatch": {
+            "type": "object",
+            "required": ["matches", "sourceDescription", "migratedDescription"],
+            "properties": {
+              "matches": { "type": "boolean", "description": "true if migrated hover behavior matches source" },
+              "sourceDescription": { "type": "string", "description": "What the source does on hover" },
+              "migratedDescription": { "type": "string", "description": "What the migrated does on hover" },
+              "delta": { "type": "string", "description": "If mismatched, describe the specific difference" }
+            }
+          },
+          "clickMatch": {
+            "type": "object",
+            "required": ["matches", "sourceDescription", "migratedDescription"],
+            "properties": {
+              "matches": { "type": "boolean", "description": "true if migrated click behavior matches source" },
+              "sourceDescription": { "type": "string" },
+              "migratedDescription": { "type": "string" },
+              "sourceUrl": { "type": "string" },
+              "migratedUrl": { "type": "string" },
+              "delta": { "type": "string" }
+            }
+          },
+          "stylingMatch": {
+            "type": "object",
+            "required": ["matches"],
+            "properties": {
+              "matches": { "type": "boolean", "description": "true if migrated visual appearance matches source for this item" },
+              "delta": { "type": "string", "description": "If mismatched: e.g. 'source has image card with thumbnail, migrated is text-only link'" },
+              "hasImage": {
+                "type": "object",
+                "properties": {
+                  "source": { "type": "boolean" },
+                  "migrated": { "type": "boolean" }
+                },
+                "description": "Whether source and migrated both have an image for this item"
+              }
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "validated", "failed"],
+            "description": "validated ONLY when hoverMatch.matches=true AND clickMatch.matches=true AND stylingMatch.matches=true"
+          },
+          "remediation": {
+            "type": "string",
+            "description": "If failed: what CSS/JS fix is needed (e.g. 'add hover event to update featured image area', 'add image-card with thumbnail')"
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["totalItems", "hoverMatches", "clickMatches", "stylingMatches", "totalValidated", "totalFailed"],
+      "properties": {
+        "totalItems": { "type": "integer" },
+        "hoverMatches": { "type": "integer" },
+        "clickMatches": { "type": "integer" },
+        "stylingMatches": { "type": "integer" },
+        "totalValidated": { "type": "integer" },
+        "totalFailed": { "type": "integer" }
+      }
+    },
+    "allValidated": {
+      "type": "boolean",
+      "description": "true ONLY when every item has status=validated. If ANY item is pending or failed, must be false."
+    }
+  }
+}

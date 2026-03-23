@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Validation Agent Output",
+  "description": "Strict schema for validation-agent. Output MUST validate against this schema.",
+  "type": "object",
+  "required": [
+    "status",
+    "similarityScore",
+    "rowMatch",
+    "spacingMatch",
+    "fontMatch",
+    "interactionMatch",
+    "megamenuGroupingMatch",
+    "mismatches",
+    "critiqueReportPath",
+    "recommendReAnalysis",
+    "notes"
+  ],
+  "properties": {
+    "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "similarityScore": { "type": "number", "minimum": 0, "maximum": 1 },
+    "rowMatch": { "type": "boolean" },
+    "spacingMatch": { "type": "boolean" },
+    "fontMatch": { "type": "boolean" },
+    "interactionMatch": { "type": "boolean" },
+    "megamenuGroupingMatch": { "type": "boolean" },
+    "mismatches": { "type": "array", "items": { "type": "string" } },
+    "critiqueReportPath": { "type": "string" },
+    "recommendReAnalysis": { "type": "boolean" },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}
