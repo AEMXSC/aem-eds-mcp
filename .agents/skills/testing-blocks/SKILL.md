@@ -76,19 +76,15 @@ Load test content URL(s) in browser and validate:
 
 **Choose the method that makes most sense given your available tools:**
 
-**Option 1: Browser/Playwright MCP (Recommended)**
+**Option 1: Playwright automation (Recommended)**
 
-If you have MCP browser or Playwright tools available, use them directly:
-- Navigate to test content URL
-- Take accessibility snapshots to inspect rendered content (preferred for interaction)
-- Take screenshots at different viewports for visual validation
-  - Consider both full-page screenshots and element-specific screenshots of the block being tested
-- Interact with elements as needed
-- Most efficient for agents with tool access
+Write one (or more) temporary test scripts to validate functionality with playwright and capture snapshots/screenshots for inspection and validation. Run via Bash — browser execution stays outside Claude's context, only results return. Token-efficient and reliable.
 
-**Option 2: Playwright automation**
+**Option 2: Browser/Playwright MCP**
 
-Write one (or more) temporary test scripts to validate functionality with playwright and capture snapshots/screenshots for inspection and validation.
+Only use if Playwright is not installed locally. MCP browser tools stream every browser action through Claude's context window, burning tokens on each screenshot and DOM query. Avoid for routine validation.
+
+**Option 3 below is the fallback for when neither Playwright nor MCP is available.**
 
 ```javascript
 // test-my-block.js (temporary - don't commit)
@@ -136,7 +132,7 @@ test().catch(console.error);
 
 Run: `node test-my-block.js` then delete the script and analyze the resulting artifacts.
 
-**Option 3: Manual browser testing**
+**Option 3: Manual browser testing (last resort)**
 
 Use a standard web browser with dev tools:
 1. Navigate to test content: `http://localhost:3000/path/to/test/content`
