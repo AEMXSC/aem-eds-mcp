@@ -349,6 +349,76 @@ The 17 EDS skills work as a system. Running them in the right sequence is where 
 
 **Orchestrator shortcut:** `/page-import` runs steps 1–4 + 7 + 10 automatically. Run steps 5–6 between 4 and 7, and steps 11–13 after.
 
+#### Playbook B2 — Site Port to EDS (Optimized Parallel Process)
+
+Learned from porting lifepointhealth.net → AEMXSC/lifepoint. Full end-to-end with parallel waves.
+
+**Wave 0 — Parallel setup (no dependencies, start immediately)**
+
+```
+├── Create GitHub repo from ise-boilerplate template
+│     gh repo create AEMXSC/<name> --template aemdemos/ise-boilerplate --public
+│     git clone + add fstab.yaml pointing to content.da.live/AEMXSC/<name>
+│
+├── Scrape live site (Playwright)
+│     ⚠ WINDOWS: node CLI silently fails — use ES module import pattern:
+│     cd .claude/skills/scrape-webpage/scripts && node --input-type=module <<'EOF'
+│     import { analyzeWebpage } from './analyze-webpage.js';
+│     const result = await analyzeWebpage('https://example.com/', '../../../import-work');
+│     EOF
+│     Output lands in .agents/import-work/ (not project root import-work/)
+│
+└── Extract design tokens (Playwright, same session as scrape)
+      Collect: computed styles on h1/h2/h3/body/button, color-bg-* classes, font-face rules
+      → colors, gradients, font families, font sizes, nav height
+```
+
+**Wave 1 — Parallel analysis (needs Wave 0 outputs)**
+
+```
+├── Identify page structure + block inventory
+│     /identify-page-structure + /block-inventory (run together)
+│     ⚠ get-block-structure.js broken on Node 21 (jsdom/parse5 ESM conflict)
+│       → Use WebFetch on https://main--aem-block-collection--adobe.aem.live/block-collection/<block>.plain.html
+│       → Or use known patterns: hero/columns/cards/tabs/accordion structures from training
+│
+└── Apply brand tokens to repo (from Wave 0 token extraction)
+      Update: styles/styles.css :root vars, hero-tokens.css, cards-tokens.css
+      Add: section metadata CSS variants (e.g., blue-gradient, cta-split)
+      Add: heading color override (headings are often a brand color, not default dark)
+      Fix: --nav-height — set to 64px default; update only after header block is built
+      Note: Adobe Fonts (Typekit) fonts → add embed to head.html, don't self-host
+```
+
+**Wave 2 — Sequential (needs Wave 1)**
+
+```
+1. Authoring analysis → generate HTML import file
+2. Copy images + push index.plain.html to cloned repo
+3. Add footer.html + footer.plain.html (extract from scraped nav/footer DOM)
+4. Update README.md (brand tokens table, preview URLs, block structure, import source)
+5. Commit + push all at once
+```
+
+**What NOT to do (lessons learned):**
+
+| Mistake | Fix |
+|---------|-----|
+| Run `node analyze-webpage.js` on Windows | Use ES module import pattern (see Wave 0) |
+| Set nav-height from original site CSS | Always default to 64px; adjust after header block built |
+| Skip design token extraction | Extract in Wave 0 — styling is required, not optional |
+| Skip footer.html + footer.plain.html | DA cannot author footer without these files |
+| Use `get-block-structure.js` on Node 21 | WebFetch `.plain.html` or use known block patterns |
+| Run `aem up` in Antigravity workspace | Antigravity is a tools repo — needs a real EDS project clone |
+| Forget to compare with a reference repo | Always check against `aemdemos/summit-vzn` or similar before shipping |
+
+**Reference comparison:** Always check your new repo against `aemdemos/summit-vzn` before handing off:
+- `footer.html` + `footer.plain.html` present?
+- `README.md` has brand + preview URLs?
+- CSS `:root` has brand colors (not boilerplate defaults)?
+- `fstab.yaml` points to correct DA org/repo?
+- `--nav-height` is 64px (not copied from original site)?
+
 #### Playbook C — Content Personalization (MCP)
 
 ```
