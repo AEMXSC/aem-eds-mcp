@@ -386,7 +386,9 @@ Learned from porting lifepointhealth.net → AEMXSC/lifepoint. Full end-to-end w
       Update: styles/styles.css :root vars, hero-tokens.css, cards-tokens.css
       Add: section metadata CSS variants (e.g., blue-gradient, cta-split)
       Add: heading color override (headings are often a brand color, not default dark)
-      Fix: --nav-height — set to 64px default; update only after header block is built
+      Fix: --nav-height — measure customer site's actual rendered header height (px);
+           do NOT copy from original site CSS or use boilerplate 64px default;
+           set it after the EDS header block is built and rendered
       Note: Adobe Fonts (Typekit) fonts → add embed to head.html, don't self-host
 ```
 
@@ -405,7 +407,7 @@ Learned from porting lifepointhealth.net → AEMXSC/lifepoint. Full end-to-end w
 | Mistake | Fix |
 |---------|-----|
 | Run `node analyze-webpage.js` on Windows | Use ES module import pattern (see Wave 0) |
-| Set nav-height from original site CSS | Always default to 64px; adjust after header block built |
+| Set nav-height from original site CSS or boilerplate default | Measure the customer's actual rendered EDS header height after the header block is built |
 | Skip design token extraction | Extract in Wave 0 — styling is required, not optional |
 | Skip footer.html + footer.plain.html | DA cannot author footer without these files |
 | Use `get-block-structure.js` on Node 21 | WebFetch `.plain.html` or use known block patterns |
@@ -417,7 +419,7 @@ Learned from porting lifepointhealth.net → AEMXSC/lifepoint. Full end-to-end w
 - `README.md` has brand + preview URLs?
 - CSS `:root` has brand colors (not boilerplate defaults)?
 - `fstab.yaml` points to correct DA org/repo?
-- `--nav-height` is 64px (not copied from original site)?
+- `--nav-height` matches actual rendered EDS header height (not original site CSS, not boilerplate default)?
 
 #### Playbook C — Content Personalization (MCP)
 
