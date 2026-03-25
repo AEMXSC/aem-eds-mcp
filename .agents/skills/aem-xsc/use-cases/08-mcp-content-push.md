@@ -29,6 +29,7 @@
 3. da_get_source   → read current page to preserve structure before overwriting
 4. da_write        → apply each content change → CDN preview triggered → published ✓
    (repeat da_get_source + da_write per page — never write blind)
+   If 5+ pages: use helix-mcp bulk preview instead — one API call, poll job status
 5. /campaign/ check → does /campaign/ exist on this site?
    No  → create 5 campaign pages (vertical-appropriate, formal US English tone)
          da_write all 5 → CDN preview triggered → published ✓
@@ -96,6 +97,14 @@ Page order unclear                  → Update home first, then /campaign/ pages
 Content tone unclear                → Default to benefit-led, conversational,
                                       customer-outcome focused. Adapt to vertical.
 Regional variant unclear            → Keep US English. Flag in report.
+5+ pages to publish                → Use helix-mcp bulk preview API —
+                                      not individual da_write calls.
+                                      POST /preview/{org}/{site}/main/*
+                                      with all paths in one payload.
+                                      Poll job status before declaring done.
+                                      Fall back to individual da_write if
+                                      HELIX_ADMIN_API_TOKEN not configured.
+
 Campaign pages missing              → Create /campaign/ subfolder with 5 pages.
                                       Vertical-appropriate content, formal US English.
                                       This makes EPA demo runnable on the call.

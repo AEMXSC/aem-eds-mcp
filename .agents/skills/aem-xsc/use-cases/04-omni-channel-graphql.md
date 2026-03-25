@@ -168,6 +168,14 @@ Approval workflow edit access fails → Flag immediately. Step 7 requires edit a
                                       demo moment — do not skip it.
 GraphQL Explorer 404                → Flag immediately. Build is blocked.
 
+5+ pages to publish                → Use helix-mcp bulk preview API —
+                                      not individual da_write calls.
+                                      POST /preview/{org}/{site}/main/*
+                                      with all paths in one payload.
+                                      Poll job status before declaring done.
+                                      Fall back to individual da_write if
+                                      HELIX_ADMIN_API_TOKEN not configured.
+
 Campaign pages (EPA demo setup)    → Build 5 EDS pages in /campaign/ on the
                                       channel preview site scaffolded in Step 4:
                                         /campaign/index

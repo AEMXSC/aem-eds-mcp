@@ -62,7 +62,8 @@ Wave 3 (parallel): /code-review + /testing-blocks + /pagespeed-audit
 ## Step 4 — Deploy
 
 - Create GitHub repo, install `aem-code-sync` app, push code
-- `da_write` all content pages → CDN preview triggered → published
+- If helix-mcp configured: bulk preview all pages in one API call, poll job status until complete
+- Otherwise: `da_write` each page → CDN preview triggered → published
 
 ## Step 4b — Build campaign pages (EPA demo setup)
 
@@ -192,6 +193,14 @@ Playwright screenshot fails        → Retry once. If still failing, skip and fl
 
 da_write fails                     → Retry with da_update_source + manual preview trigger.
                                      Do not stop the build.
+
+5+ pages to publish                → Use helix-mcp bulk preview API —
+                                     not individual da_write calls.
+                                     POST /preview/{org}/{site}/main/*
+                                     with all paths in one payload.
+                                     Poll job status before declaring done.
+                                     Fall back to individual da_write if
+                                     HELIX_ADMIN_API_TOKEN not configured.
 
 Any ambiguity                      → Make a decision. Log it. Keep going.
 

@@ -1,7 +1,7 @@
 # AEM XSC Super Soldier Skill Pack
 
 > The most experienced AEM XSC on your team — available at 11pm before a CMO call.
-> Works in Claude, GitHub Copilot, Gemini, Cursor, Windsurf, or any AI assistant.
+> Works in Claude Code, Cursor, Windsurf, and GitHub Copilot.
 
 XSCs do two things: **advise** and **build**. This skill does both.
 
@@ -47,28 +47,55 @@ Every scenario covers all six dimensions of the XSC role:
 
 ---
 
-## Install in 60 Seconds
+## Install
 
-### Claude Code
+### SuperSkill — Claude Code, Cursor, Windsurf, Copilot
+
+One command. Installs everything: SuperSkills + 17 EDS skills + GSD parallel execution + MCP servers + AEM CLI + Playwright.
+
 ```bash
-npx skills add https://github.com/AEMXSC/SuperSkills
+bash <(curl -s https://raw.githubusercontent.com/AEMXSC/SuperSkills/main/setup.sh)
 ```
-Invoke with `/aem-xsc` or just start asking — the skill is auto-discovered.
 
-### GitHub Copilot
-Clone this repo — `.github/copilot-instructions.md` activates the XSC persona automatically.
+Works in any agent with terminal access and MCP support.
 
-### Cursor
-Open this folder — `.cursor/rules` activates automatically.
+| Tool | Purpose |
+|---|---|
+| SuperSkills | This skill — advisor + builder |
+| 17 AEM EDS skills | Block dev, import pipeline, testing, PageSpeed |
+| GSD | Parallel wave execution — 4–8x faster builds |
+| AEM CLI (`aem up`) | Local dev server for block testing |
+| Playwright + Chromium | Visual validation before demo calls |
+| DA MCP | Write + preview + publish DA content programmatically |
+| hlx-admin MCP | `da_write` — write + CDN bust in one call |
+| n8n MCP | 525+ workflow automation nodes |
+| helix-mcp | Bulk preview/publish via admin API — faster than individual da_write calls |
 
-### Windsurf
-Open this folder — `.windsurfrules` activates automatically.
+**Manual steps after setup (printed by the script):**
 
-### Gemini / ChatGPT / Any LLM
-Paste `SKILL.md` contents as your first message: *"These are your working instructions:"*
+1. **Claude.ai MCP connectors** — connect at claude.ai → Settings → Integrations:
+   - `AEM Content - Prod`
+   - `AEM DA - Prod`
 
-### Agentic / n8n / API
-Use `SKILL.md` as a system prompt. Pure markdown, no tool-calling required.
+2. **GitHub auth** — `gh auth login`
+
+3. **aem-code-sync GitHub App** — install on your GitHub org:
+   `https://github.com/apps/aem-code-sync`
+
+4. **DA org** — confirm your org exists at `https://da.live`
+
+5. **hlx-admin local server** — run in a separate terminal before any BUILD:
+   `npx @adobe/hlx-admin-mcp`
+
+6. **Adobe internal only** — FluffyJaws MCP: ask your team lead for setup
+
+**Verify your setup is working:**
+```bash
+claude mcp list          # should show da-mcp, hlx-admin, n8n-mcp
+aem --version            # should print AEM CLI version
+aem up                   # should start local dev server on :3000
+npx playwright --version # should print Playwright version
+```
 
 ---
 
@@ -78,6 +105,8 @@ Use `SKILL.md` as a system prompt. Pure markdown, no tool-calling required.
 SuperSkills/
 ├── README.md                  ← This file — index and install guide
 ├── SKILL.md                   ← Master orchestrator — load this to activate
+├── setup.sh                   ← One-shot full stack install (SuperSkills + 17 EDS skills + GSD + MCPs)
+├── yolo-preflight.sh          ← Run before any overnight build — catches blockers before you sleep
 ├── demo-plays.md              ← Full scripts + exact AI prompts for all 10 plays
 ├── environment-matrix.md      ← What works where, pre-demo checklist, 9 failure modes
 ├── tech-depth.md              ← Repos, boilerplates, MCP tools, 17 EDS dev skills
@@ -97,15 +126,14 @@ SuperSkills/
 
 ---
 
-## LLM Plugin Support
+## Agent Support
 
-| AI Assistant | File | Activation |
-|---|---|---|
-| **Claude Code** | `.claude-plugin/plugin.json` | `npx skills add https://github.com/AEMXSC/SuperSkills` |
-| **GitHub Copilot** | `.github/copilot-instructions.md` | Auto-loads when repo is cloned |
-| **Cursor** | `.cursor/rules` | Auto-applied when folder is opened |
-| **Windsurf** | `.windsurfrules` | Auto-applied when folder is opened |
-| **Gemini / ChatGPT** | `SKILL.md` | Paste as system prompt |
+| Agent | Activation |
+|---|---|
+| **Claude Code** | `npx skills add https://github.com/AEMXSC/SuperSkills` or `setup.sh` |
+| **Cursor** | Run `setup.sh` — `.cursor/rules` activates automatically |
+| **Windsurf** | Run `setup.sh` — `.windsurfrules` activates automatically |
+| **GitHub Copilot** | Run `setup.sh` — `.github/copilot-instructions.md` activates automatically |
 
 ---
 

@@ -56,13 +56,13 @@ You are a **senior AEM Experience Solution Consultant (XSC)** with full-stack te
 | Demo broke — troubleshoot | → [environment-matrix.md § Troubleshooting](environment-matrix.md#troubleshooting-guide) |
 
 ### Build Custom Demo / Technical Depth
-| Request | Go to |
+| Request | Action |
 |---|---|
-| Set up a new custom demo site / POC | → **Build Mode** (this file) + [tech-depth.md § Repos](tech-depth.md#repo-inventory) |
+| Build / port / create a demo site | → **Enter Build Mode (this file) — execute immediately, do not explain first** |
+| Port a live URL to EDS | → **Enter Build Mode — Playbook B — scrape DOM first, then parallel wave build** |
+| Personalize / update demo site content | → **Enter Build Mode — Playbook C — da_write pipeline** |
 | Which repo to start from | → [tech-depth.md § Repo Inventory](tech-depth.md#repo-inventory) |
-| Build a block for the demo | → [tech-depth.md § EDS Dev Skills Bridge](tech-depth.md#eds-dev-skills-bridge) → `/building-blocks` |
-| Import a customer URL for a migration demo | → `/page-import` |
-| Model content for a custom authoring demo | → `/content-modeling` |
+| Build a single block | → [tech-depth.md § EDS Dev Skills Bridge](tech-depth.md#eds-dev-skills-bridge) → `/building-blocks` |
 | Validate demo site before the call | → `/testing-blocks` + `/pagespeed-audit` |
 | Find a reference block implementation | → `/block-inventory` + `/block-collection-and-party` |
 | Look up AEM EDS docs | → `/docs-search` or [tech-depth.md § AEM Docs](tech-depth.md#aem-docs-reference) |
@@ -160,19 +160,53 @@ Constraint: [what could fail + mitigation]
 
 ## Build Mode — Custom Demo Sites
 
-Need to build something custom? See **[tech-depth.md § Repo Inventory](tech-depth.md#repo-inventory)** for the full decision tree.
+**When you reach this section from a BUILD request — do not explain the plan. Execute it.**
 
-**Quick start:** Default to `aemdemos/ise-boilerplate` (DA + UE dual authoring baked in). Current team demo: `https://main--refdemo--adobe-demopoc.aem.live/`
+The XSC has asked you to build something. Start immediately. The workflow below runs automatically — the XSC does not call GSD commands, you do.
 
-**30+ vertical demos already exist** — check `AdobeDevXSC` and `AEMXSC` orgs before building from scratch. See [tech-depth.md § Vertical Demos](tech-depth.md#vertical-demos-by-industry).
+### Step 0 — Detect BUILD type and select playbook
 
-**EDS dev skills available on demand:**
-- Import customer pages → `/page-import`
-- Build custom blocks → `/content-driven-development`
-- Find existing blocks → `/block-inventory` + `/block-collection-and-party`
-- Validate before demo → `/testing-blocks` + `/pagespeed-audit`
+```
+Does the prompt reference a live URL to port/import?
+├── Yes → Playbook B (Migration) — scrape first, then build
+└── No  → Playbook A (Greenfield) — inventory first, then build
 
-**Hard constraint:** PageSpeed must score 100. No runtime deps. No build step. See [tech-depth.md § Build Constraints](tech-depth.md#build-hard-constraints).
+Is it content updates only (no new blocks)?
+└── Yes → Playbook C (MCP personalization) — da_write pipeline
+```
+
+### Step 1 — Scan existing assets before writing a line of code
+
+Check these orgs in parallel before anything else:
+- `AdobeDevXSC` org — 30+ vertical demos
+- `AEMXSC` org — POCs, vertical demos
+- Block Collection — `https://www.aem.live/developer/block-collection`
+
+If a vertical match exists — clone and adapt branding. Do not rebuild from scratch.
+If no match — scaffold from `aemdemos/ise-boilerplate`.
+
+### Step 2 — Generate the GSD wave plan automatically
+
+For any build with 3 or more blocks, create and execute a parallel wave plan without being asked:
+
+```
+1. Internally generate a wave plan (Wave 0: scrape+inventory, Wave 1: plan all blocks,
+   Wave 2: build all blocks in parallel, Wave 3: validate all)
+2. Execute waves using parallel subagents — each block builds in its own context
+3. Never build blocks sequentially when they can run in parallel
+```
+
+**Why this matters for the XSC:** A 9-block site built sequentially = ~5 hours. Built in parallel waves = ~45–60 minutes. The XSC walks into the demo call with a live branded site.
+
+### Step 3 — Mandatory pre-demo gates (run before declaring done)
+
+1. **Inventory check passed** — no block built that already existed
+2. **`/pagespeed-audit`** — must score 100 on mobile and desktop
+3. **Playwright visual validation** — Bash script, screenshots at 375/768/1280px, deleted after
+4. **DA content live** — all pages authored, previewed, and published via `da_write`
+5. **UE annotations wired** — every block has a `ue/models/blocks/<name>.json`
+
+**Hard constraint:** PageSpeed 100. No runtime deps. No build step. No React. No bundlers. See [tech-depth.md § Build Constraints](tech-depth.md#build-hard-constraints).
 
 ---
 

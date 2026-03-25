@@ -143,7 +143,8 @@ Wave 2 (parallel): /building-blocks → JS + CSS + UE model JSON per block
 - `fstab.yaml` → DA content mount
 - `component-definition.json`, `component-filters.json`, `component-models.json`
 - Per-block UE model JSON for every block built in Step 3
-- `da_write` all 3 pages → CDN preview triggered → published
+- If helix-mcp configured: bulk preview all pages in one API call, poll job status until complete
+- Otherwise: `da_write` each page → CDN preview triggered → published
 
 **Scripted authoring flow for the demo:**
 Change hero copy → update one card → publish → Lighthouse re-run. This is the live moment. Practice it.
@@ -289,6 +290,14 @@ hlx-admin-mcp not responding        → Fall back to da_update_source. Flag: CDN
 
 GitHub auth expired                 → Flag immediately. Blocks deploy entirely.
 aem-code-sync not installed         → Flag. Install: github.com/apps/aem-code-sync
+
+5+ pages to publish                → Use helix-mcp bulk preview API —
+                                      not individual da_write calls.
+                                      POST /preview/{org}/{site}/main/*
+                                      with all paths in one payload.
+                                      Poll job status before declaring done.
+                                      Fall back to individual da_write if
+                                      HELIX_ADMIN_API_TOKEN not configured.
 
 Campaign pages (EPA demo setup)    → After importing the 3 customer pages,
                                       build 5 campaign pages in /campaign/:
