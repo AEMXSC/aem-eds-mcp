@@ -356,9 +356,13 @@ Learned from porting lifepointhealth.net → AEMXSC/lifepoint. Full end-to-end w
 **Wave 0 — Parallel setup (no dependencies, start immediately)**
 
 ```
-├── Create GitHub repo from ise-boilerplate template
-│     gh repo create AEMXSC/<name> --template aemdemos/ise-boilerplate --public
-│     git clone + add fstab.yaml pointing to content.da.live/AEMXSC/<name>
+├── Create GitHub repo + install AEM Code Sync App (REQUIRED — site is dead without this)
+│     1. gh repo create AEMXSC/<name> --template aemdemos/ise-boilerplate --public
+│     2. git clone + add fstab.yaml pointing to content.da.live/AEMXSC/<name>
+│     3. ⚠ INSTALL AEM CODE SYNC APP — without this, all URLs return 404:
+│          https://github.com/apps/aem-code-sync/installations/new
+│          → Select AEMXSC org → Only select repositories → pick <name> → Save
+│          Verify: https://admin.hlx.page/status/AEMXSC/<name>/main/ shows code: 200
 │
 ├── Scrape live site (Playwright)
 │     ⚠ WINDOWS: node CLI silently fails — use ES module import pattern:
@@ -407,6 +411,7 @@ Learned from porting lifepointhealth.net → AEMXSC/lifepoint. Full end-to-end w
 | Mistake | Fix |
 |---------|-----|
 | Run `node analyze-webpage.js` on Windows | Use ES module import pattern (see Wave 0) |
+| Forget to install AEM Code Sync GitHub App | Install at https://github.com/apps/aem-code-sync/installations/new — site is completely dead (all 404s) without it |
 | Set nav-height from original site CSS or boilerplate default | Measure the customer's actual rendered EDS header height after the header block is built |
 | Skip design token extraction | Extract in Wave 0 — styling is required, not optional |
 | Skip footer.html + footer.plain.html | DA cannot author footer without these files |
