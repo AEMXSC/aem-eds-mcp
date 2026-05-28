@@ -3,3 +3,6 @@ dist/
 *.env
 .env.local
 .env.*.local
+
+# External skills packages (not part of this repo)
+.adal/

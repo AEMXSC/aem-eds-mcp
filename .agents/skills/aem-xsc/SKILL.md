@@ -73,7 +73,9 @@ You are a **senior AEM Experience Solution Consultant (XSC)** with full-stack te
 | DA vs Universal Editor — which to show? | → **DA vs UE Guide** (this file) |
 | Explain DA (Document Authoring) to customer | → **DA vs UE Guide** (this file) |
 | Explain XWalk / Universal Editor | → **DA vs UE Guide** (this file) |
+| Experience Workspace / DA canvas / AI-native authoring | → **DA vs UE Guide** (this file) |
 | Set up both authoring modes | → [tech-depth.md § Dual Authoring Setup](tech-depth.md#dual-authoring-setup) |
+| Enable Experience Workspace for an org/site | → [tech-depth.md § Experience Workspace](tech-depth.md#experience-workspace) |
 
 ### MCP & Automation Tools
 | Request | Go to |
@@ -223,19 +225,30 @@ What audience are you demoing to?
 │          It renders as a live website automatically."
 │       → Great for: content velocity story, "no CMS training" story
 │
+├── Authors who want AI-assisted visual editing inside DA itself (⚡ Early Access)
+│   └── Lead with Experience Workspace
+│       → "Write and edit visually in da.live — AI assistant, brand context, agent
+│          collaboration built in. No separate tool, no training."
+│       → Great for: AI-native authoring story, human+agent collaboration story
+│       → Enable: da.live/config#/<org>/ → add editor.path → https://da.live/canvas#
+│       → Requires: Quick Edit implementation in codebase first
+│       → ⚠ Early Access — verify org eligibility before showing in a live demo
+│
 ├── Marketers who want WYSIWYG in-context editing
 │   └── Lead with Universal Editor (XWalk)
 │       → "Click anything on the live page and edit it in-place."
 │       → Great for: "feels like WordPress" but with EDS performance
 │
 ├── Technical architects evaluating the stack
-│   └── Show both + explain the architecture
+│   └── Show all three + explain the architecture
 │       → DA: content in da.live → fstab.yaml → EDS pipeline → CDN
+│       → Experience Workspace: DA canvas with WYSIWYG + AI — same pipeline
 │       → UE: content in AEM Sites → XWalk bridge → same EDS pipeline
-│       → One codebase, one CDN, two authoring surfaces
+│       → One codebase, one CDN, three authoring surfaces
 │
 └── Default (no strong signal)
     └── Show DA first (simpler, more surprising), then UE as "and if they want WYSIWYG..."
+    └── Mention Experience Workspace as "where DA is heading — AI + visual, still same CDN"
 ```
 
 ### DA (Document Authoring) — Key Facts for Demo
@@ -245,6 +258,7 @@ What audience are you demoing to?
 - Sidekick browser extension: preview → publish without leaving the page
 - **MCP tools available:** `da_list_sources`, `da_get_source`, `da_update_source`, `da_create_source`, `da_upload_media` — see MCP Toolbox
 - Edit URL: `https://da.live/edit#/<org>/<repo>/<path>`
+- **Experience Workspace** (Early Access) — the next-gen DA surface: WYSIWYG canvas + AI assistant + agent collaboration. Same DA backend, same CDN pipeline. Enable per-org via `editor.path` config → see [tech-depth.md § Experience Workspace](tech-depth.md#experience-workspace)
 
 ### Universal Editor (XWalk) — Key Facts for Demo
 - In-context WYSIWYG on the **live page** — click any block to edit

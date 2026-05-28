@@ -11,6 +11,12 @@
       "sourceType": "github",
       "computedHash": "8d26dd47633d3543d6d2df4cdb14bf1e692ad38dd1300e9711bf9069a16c451a"
     },
+    "agents-sdk": {
+      "source": "cloudflare/skills",
+      "sourceType": "github",
+      "skillPath": "skills/agents-sdk/SKILL.md",
+      "computedHash": "01515ef239bee4ab1464d0eb735a857de3832a304fccd9315bf439837c053e62"
+    },
     "alpha-vantage": {
       "source": "K-Dense-AI/claude-scientific-skills",
       "sourceType": "github",
@@ -91,6 +97,12 @@
       "sourceType": "github",
       "computedHash": "ad43a53c210f1241073c9a62df03a97b4a4ada2022e0ed40d59432fb73db487d"
     },
+    "board-prep": {
+      "source": "alirezarezvani/claude-skills",
+      "sourceType": "github",
+      "skillPath": "c-level-advisor/executive-mentor/skills/board-prep/SKILL.md",
+      "computedHash": "d1d0f36644c79f93179b6a16a3caadb1ec8355eb28d6ff3ba31271575f2620d7"
+    },
     "brenda-database": {
       "source": "K-Dense-AI/claude-scientific-skills",
       "sourceType": "github",
@@ -161,6 +173,12 @@
       "sourceType": "github",
       "computedHash": "f8792faf81b9b76911ab5cf683c7f17d0d0f8a79d713b6057dbd4f2e4b2ac97e"
     },
+    "competitive-teardown": {
+      "source": "alirezarezvani/claude-skills",
+      "sourceType": "github",
+      "skillPath": "product-team/skills/competitive-teardown/SKILL.md",
+      "computedHash": "8c4bf772184c42df2de0c6a996e84403fe27f95a001931d4aba46d5f821364ca"
+    },
     "consciousness-council": {
       "source": "K-Dense-AI/claude-scientific-skills",
       "sourceType": "github",
@@ -180,6 +198,12 @@
       "source": "K-Dense-AI/claude-scientific-skills",
       "sourceType": "github",
       "computedHash": "1bfeffa3aa5a2baf2041709876ad331669044c564d80ac93942a139f496733e3"
+    },
+    "d3-viz": {
+      "source": "chrisvoncsefalvay/claude-d3js-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "7bf222fdb6005fc8b802b43b93a5f4db9b40db15ec5c13a646ab5edfa52b94e7"
     },
     "dask": {
       "source": "K-Dense-AI/claude-scientific-skills",
@@ -211,10 +235,23 @@
       "sourceType": "github",
       "computedHash": "eefad29dff723822d076f9cc37d8873aed741bd02d182601af44938e4ec0889e"
     },
+    "demo-video": {
+      "source": "alirezarezvani/claude-skills",
+      "sourceType": "github",
+      "skillPath": "engineering/demo-video/skills/demo-video/SKILL.md",
+      "computedHash": "afb7ba83e19c41c812c16a8e8d4fdb74f5f67c94dd2954690d92884cfa91c9c8"
+    },
     "denario": {
       "source": "K-Dense-AI/claude-scientific-skills",
       "sourceType": "github",
       "computedHash": "73ff81e84a178962eda0a43974e054f00c8fab3441c71aeaa25a4f4faa5f6d00"
+    },
+    "deploy": {
+      "source": "paolomoz/skills",
+      "ref": "main",
+      "sourceType": "github",
+      "skillPath": "skills/deploy/SKILL.md",
+      "computedHash": "084ee6718829a2dd6a1c1c6ed5b3b6f2d3c2008b7c6919846eb61c907ebf6ac5"
     },
     "depmap": {
       "source": "K-Dense-AI/claude-scientific-skills",
@@ -230,6 +267,13 @@
       "source": "K-Dense-AI/claude-scientific-skills",
       "sourceType": "github",
       "computedHash": "ab0d5bac3856ee6a1a0eb3f2fa860a74b15229884f197210dd1be4dacd5d6d4c"
+    },
+    "direct": {
+      "source": "adobe/skills",
+      "ref": "main",
+      "sourceType": "github",
+      "skillPath": "plugins/stardust/skills/direct/SKILL.md",
+      "computedHash": "bd44b2c046952a027c5414d03c734d62ba1956a81c9089e231c3ae8af27713a2"
     },
     "dnanexus-integration": {
       "source": "K-Dense-AI/claude-scientific-skills",
@@ -276,10 +320,23 @@
       "sourceType": "github",
       "computedHash": "048cdf3116c42da2e1138642c4b92bffee2f72ca93c7fe977daddcc906d82d46"
     },
+    "executive-mentor": {
+      "source": "alirezarezvani/claude-skills",
+      "sourceType": "github",
+      "skillPath": "c-level-advisor/executive-mentor/skills/executive-mentor/SKILL.md",
+      "computedHash": "644f491978398ec3342bde642a817cf5a9025e61269ed7de4d189ec86b11dbdf"
+    },
     "exploratory-data-analysis": {
       "source": "K-Dense-AI/claude-scientific-skills",
       "sourceType": "github",
       "computedHash": "60d274a1329d7ce57c07a9e1b2e24822c5016711110f7142955ac802fb8f3e05"
+    },
+    "extract": {
+      "source": "adobe/skills",
+      "ref": "main",
+      "sourceType": "github",
+      "skillPath": "plugins/stardust/skills/extract/SKILL.md",
+      "computedHash": "3262e918841623a56e2ea71ac46a57d3108b378b11dc1b55fe9efac5a7079094"
     },
     "fda-database": {
       "source": "K-Dense-AI/claude-scientific-skills",
@@ -305,6 +362,12 @@
       "source": "K-Dense-AI/claude-scientific-skills",
       "sourceType": "github",
       "computedHash": "58e8ba61bbc09a928718fe37db9425801985d6545173afb80337725e00f95d1e"
+    },
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-design/SKILL.md",
+      "computedHash": "516bd2154eb843a8240e43d5b285229129853114ad7075a5e141e1c08e408c84"
     },
     "gene-database": {
       "source": "K-Dense-AI/claude-scientific-skills",
@@ -416,6 +479,12 @@
       "sourceType": "github",
       "computedHash": "cef64b19109cac2573ee1a9744c73ff075cbf34f65c7d91fe617ced6dc8832f8"
     },
+    "impeccable": {
+      "source": "pbakaus/impeccable",
+      "sourceType": "github",
+      "skillPath": "skill/SKILL.md",
+      "computedHash": "c8f645c3e9aace8baf528021165168bac77d4f761f0ab7baf45e06e01691500f"
+    },
     "infographics": {
       "source": "K-Dense-AI/claude-scientific-skills",
       "sourceType": "github",
@@ -501,6 +570,12 @@
       "sourceType": "github",
       "computedHash": "6aa1b561363b3d51b8ba589564b6040007e95aa66897915ab9bb6495063e62e1"
     },
+    "mcp-builder": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/mcp-builder/SKILL.md",
+      "computedHash": "6498a736a8dc5c645047c8a875b8ea7417e2ad97146f005200e50d20a9337ada"
+    },
     "medchem": {
       "source": "K-Dense-AI/claude-scientific-skills",
       "sourceType": "github",
@@ -510,6 +585,13 @@
       "source": "K-Dense-AI/claude-scientific-skills",
       "sourceType": "github",
       "computedHash": "60a43a3f24d9a5ea8b3b0fab80bf041ea3d08084a4865bab676284dd28c21caf"
+    },
+    "migrate": {
+      "source": "adobe/skills",
+      "ref": "main",
+      "sourceType": "github",
+      "skillPath": "plugins/stardust/skills/migrate/SKILL.md",
+      "computedHash": "5088ff3689df1f60bcb45ddde5e661e93d76f9f74b39d92260dbb11dc2676c33"
     },
     "modal": {
       "source": "K-Dense-AI/claude-scientific-skills",
@@ -666,6 +748,13 @@
       "sourceType": "github",
       "computedHash": "b5c42e61ca3a9bce2c306cfabdbaae119e4ec9554e84495ac1f3e1841411d519"
     },
+    "prepare-migration": {
+      "source": "adobe/skills",
+      "ref": "main",
+      "sourceType": "github",
+      "skillPath": "plugins/stardust/skills/prepare-migration/SKILL.md",
+      "computedHash": "67c7bdfb0dcbd575efd77fbe4d91bcc871e0e98cead4c301649340454ef443ff"
+    },
     "preview-import": {
       "source": "adobe/skills",
       "sourceType": "github",
@@ -680,6 +769,13 @@
       "source": "K-Dense-AI/claude-scientific-skills",
       "sourceType": "github",
       "computedHash": "c997aa18ef71127e11125a556a3631ece024bc24f30e4d4d504bf7440ceeb8a0"
+    },
+    "prototype": {
+      "source": "adobe/skills",
+      "ref": "main",
+      "sourceType": "github",
+      "skillPath": "plugins/stardust/skills/prototype/SKILL.md",
+      "computedHash": "35d47d2079e1c97fbffe9ffcafcc53183b42199e596b6639bbccc2d9011d85a9"
     },
     "pubchem-database": {
       "source": "K-Dense-AI/claude-scientific-skills",
@@ -791,6 +887,12 @@
       "sourceType": "github",
       "computedHash": "05f968efaf48c5fde7cc087d86a7639706cdd06455d5709d2b6a994a10e71cfc"
     },
+    "sales-engineer": {
+      "source": "alirezarezvani/claude-skills",
+      "sourceType": "github",
+      "skillPath": "business-growth/skills/sales-engineer/SKILL.md",
+      "computedHash": "5db6bfacd9f0859c7aac41321be4c306ede8780de6f749bf01101464fb9da5e1"
+    },
     "scanpy": {
       "source": "K-Dense-AI/claude-scientific-skills",
       "sourceType": "github",
@@ -881,6 +983,20 @@
       "sourceType": "github",
       "computedHash": "22eadcd9626a86c0f995233bc32aaf375290c24e201fdbf5b1ee5e35385bc7a8"
     },
+    "stardust": {
+      "source": "adobe/skills",
+      "ref": "main",
+      "sourceType": "github",
+      "skillPath": "plugins/stardust/skills/stardust/SKILL.md",
+      "computedHash": "9de9f5de2fd6d4bba37a94b0a0ee7426dd6a3a327a2c97a0f69886cb53ffb126"
+    },
+    "stardust-to-snowflake": {
+      "source": "ai-ecoverse/snowflake",
+      "ref": "main",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/stardust-to-snowflake/SKILL.md",
+      "computedHash": "d1edd7b7193acd2255312b47607d5a9cb9c386efec5402b7f6bb4389d95dad96"
+    },
     "statistical-analysis": {
       "source": "K-Dense-AI/claude-scientific-skills",
       "sourceType": "github",
@@ -970,6 +1086,18 @@
       "source": "K-Dense-AI/claude-scientific-skills",
       "sourceType": "github",
       "computedHash": "39b46e83092f96e4f2c96c363e2762a5f785dbff979981625f25ad999e282f86"
+    },
+    "workers-best-practices": {
+      "source": "cloudflare/skills",
+      "sourceType": "github",
+      "skillPath": "skills/workers-best-practices/SKILL.md",
+      "computedHash": "c919a93c9db826a0ee2818f6f7977c40c1a43bb87abc848b22181fdbabe2ef80"
+    },
+    "wrangler": {
+      "source": "cloudflare/skills",
+      "sourceType": "github",
+      "skillPath": "skills/wrangler/SKILL.md",
+      "computedHash": "d2094f7a5a76414fc0cd365fd8ddba3258c2135a1d468b78213c0fa02c309b9b"
     },
     "xlsx": {
       "source": "K-Dense-AI/claude-scientific-skills",

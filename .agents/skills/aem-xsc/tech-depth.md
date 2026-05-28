@@ -580,6 +580,68 @@ Use for read operations and when you need fine-grained control. **Always prefer 
 
 ---
 
+## Experience Workspace
+
+> **Docs:** https://docs.da.live/about/early-access/experience-workspace
+> **Status:** Early Access — verify org eligibility before demoing
+
+Experience Workspace is the next-generation DA authoring surface. Same DA backend and EDS pipeline — new canvas-based editor with WYSIWYG, built-in AI assistant, enterprise brand context, agent collaboration, and author memory. It **replaces** the classic DA text editor for configured orgs/paths.
+
+### What It Is vs. Classic DA vs. UE
+
+| Surface | Where You Edit | Editing Style | AI Built-in | Status |
+|---|---|---|---|---|
+| Classic DA | da.live text editor | Google Docs-style | No | GA |
+| **Experience Workspace** | da.live canvas | WYSIWYG + AI assistant | Yes | Early Access |
+| Universal Editor | Live page (in-browser) | In-context click-to-edit | No | GA |
+
+**The pitch:** "Same DA content pipeline — Google Docs simplicity — but now with a visual canvas and an AI co-author built in. One click from the Sidekick, no new tools to learn."
+
+### Capabilities
+
+- WYSIWYG visual editor (canvas-based, not text)
+- Integrated AI assistant with prompt + skill access
+- Multi-user and agent collaboration
+- Enterprise context: brand identity and marketing signals fed to the AI
+- Author memory: learns preferences and skills over time
+- AEM Assets integration for media
+- MCP / Agents / Skills support — connects Adobe and third-party apps
+- Publishing, scheduling, workflow management
+- REST API for programmatic access
+
+### Setup — Two Steps Required
+
+**Step 1 — Quick Edit implementation in the codebase**
+Follow the Quick Edit setup guide to enable WYSIWYG in the repo. Without this, the canvas editor cannot render blocks.
+
+**Step 2 — Org config: add `editor.path`**
+Go to: `https://da.live/config#/<your-org-name>/`
+Add the `editor.path` key pointing to the Experience Workspace canvas:
+```
+editor.path = https://da.live/canvas#
+```
+
+You can scope it selectively:
+- Entire org: add at the org config level
+- One site only: add to the site's config path
+- Specific subpath: scope with a path prefix
+
+**Verify:** Open `https://da.live/edit#/<org>/<repo>/` — you should land on the canvas editor instead of the classic text editor.
+
+### Demo Angles
+
+- **AI-native authoring:** "Your author opens a page in DA, and there's an AI co-author already aware of your brand guidelines. They type a prompt — 'rewrite this section for the EMEA audience' — and the AI rewrites it in-context."
+- **Human + agent collaboration:** "Marketing and an AI agent work on the same canvas, same page, at the same time. The agent handles the structured copy; the human handles the creative decisions."
+- **No new tools:** "Same DA backend. Same Sidekick preview button. Same PageSpeed 100 on publish. The editing surface is just smarter."
+
+### Guardrails
+
+- ⚠ Early Access — not GA; check with customer whether their org is eligible
+- Requires Quick Edit implementation in codebase first — doesn't work on plain boilerplate without it
+- AEM Assets integration requires DMwOA-enabled org for full media management
+
+---
+
 ## Demo & Trial Environment URLs
 
 These are your fastest paths to a live demo — no provisioning, no Cloud Manager setup required.

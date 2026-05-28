@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Sales / Forecast Skills
+
+| Skill | Description |
+|-------|-------------|
+| `/ps-aem-forecast [version]` | Extract all AEM deals (DR, account, GNARR, tech driver) from the Americas PS Forecast File ARR on SharePoint. Omit version to auto-detect latest. Outputs deduplicated CSV to Downloads. Run bi-weekly when a new forecast drops. |
+
+Skill location: [.agents/skills/ps-aem-forecast/](.agents/skills/ps-aem-forecast/)
+
 ## AEM Edge Delivery Services Skills
 
 All 17 Adobe AEM EDS skills are installed in [.agents/skills/](.agents/skills/) and available as slash commands:
@@ -131,6 +139,15 @@ Component library implementing Adobe's Spectrum design system as web components.
 https://github.com/hesreallyhim/awesome-claude-code
 
 Use this to discover new skills, MCPs, and extensions to add to this project.
+
+## GEO Research Skill
+
+Installed in `.agents/skills/geo-research/` — trigger with `/geo-research`.
+
+Performs a full **Generative Engine Optimization (GEO)** audit on any URL: scored 16-check technical audit (HTML visibility, meta tags, structured data, page speed, canonical health), "should-win" prompt list, prioritized recommendations, and AEM EDS gap-to-solution mapping. Optionally exports as an Adobe-branded PowerPoint deck.
+
+- `/geo-research` — run a complete GEO audit on a URL
+- Source: https://github.com/AdobeDrago/geo-research
 
 ## AEM EDS Documentation
 
