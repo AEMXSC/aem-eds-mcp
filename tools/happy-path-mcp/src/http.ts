@@ -32,10 +32,12 @@ app.get("/.well-known/oauth-authorization-server", (_req: Request, res: Response
     issuer: base,
     authorization_endpoint: `${base}/authorize`,
     token_endpoint: `${base}/token`,
+    registration_endpoint: `${base}/register`,
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code"],
     code_challenge_methods_supported: ["S256"],
     scopes_supported: ["openid"],
+    token_endpoint_auth_methods_supported: ["none"],
     resource: base,
   });
 });
@@ -43,6 +45,21 @@ app.get("/.well-known/oauth-authorization-server", (_req: Request, res: Response
 app.get("/.well-known/oauth-protected-resource", (_req: Request, res: Response) => {
   const base = process.env.PUBLIC_URL ?? `http://localhost:${PORT}`;
   res.json({ resource: base, authorization_servers: [base] });
+});
+
+// Dynamic client registration — accept any client, return it back
+app.use("/register", express.json());
+app.post("/register", (req: Request, res: Response) => {
+  const body = req.body as Record<string, unknown> ?? {};
+  const clientId = (body.client_id as string | undefined) ?? randomBytes(8).toString("hex");
+  res.status(201).json({
+    client_id: clientId,
+    client_id_issued_at: Math.floor(Date.now() / 1000),
+    grant_types: ["authorization_code"],
+    response_types: ["code"],
+    token_endpoint_auth_method: "none",
+    redirect_uris: body.redirect_uris ?? [],
+  });
 });
 
 // Auto-approve: immediately redirect back with a code — no login page needed
