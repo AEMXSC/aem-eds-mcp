@@ -116,7 +116,7 @@ app.delete("/mcp", (req: Request, res: Response) => {
 
 // ─── REST endpoint (Adobe Enterprise artifact workaround — plain JSON, no SSE) ─
 
-app.post("/score", express.json(), scoreRoute);
+app.post("/score", scoreRoute);
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 

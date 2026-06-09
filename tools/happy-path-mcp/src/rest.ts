@@ -4,12 +4,14 @@ import { analyzePageHtml, aggregateInventory } from "./migration/classifier.js";
 import { computeScore } from "./migration/scorer.js";
 
 export async function scoreRoute(req: Request, res: Response): Promise<void> {
-  const { url, customer_name } = req.body as { url?: string; customer_name?: string };
+  const { url, customer_name } = (req.body ?? {}) as { url?: unknown; customer_name?: unknown };
 
-  if (!url) {
-    res.status(400).json({ error: "url is required" });
+  if (!url || typeof url !== "string") {
+    res.status(400).json({ error: "url must be a non-empty string" });
     return;
   }
+
+  const name = typeof customer_name === "string" ? customer_name : undefined;
 
   try {
     validatePublicUrl(url);
@@ -25,9 +27,9 @@ export async function scoreRoute(req: Request, res: Response): Promise<void> {
       .map(s => analyzePageHtml(s.url, s.html));
     const inventory = aggregateInventory(pageSignals);
     const result = computeScore(inventory, siteData.stats, pageSignals);
-    res.json({ ...result, customer_name: customer_name ?? null });
+    res.json({ ...result, customer_name: name ?? null });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: message });
+    process.stderr.write(`[score] scrape failed for ${url}: ${err instanceof Error ? err.message : String(err)}\n`);
+    res.status(500).json({ error: "Failed to analyze site. Check that the URL is publicly accessible." });
   }
 }
