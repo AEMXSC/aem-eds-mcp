@@ -49,6 +49,7 @@ app.use((req, res, next) => {
 app.post("/mcp", async (req: Request, res: Response) => {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
+  // Existing session — route to stored transport
   if (sessionId) {
     const existing = transports.get(sessionId);
     if (!existing) { res.status(404).json({ error: "Session not found" }); return; }
@@ -56,17 +57,26 @@ app.post("/mcp", async (req: Request, res: Response) => {
     return;
   }
 
-  // New session
-  let transport: StreamableHTTPServerTransport;
-  transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
-    onsessioninitialized: (id: string): void => { transports.set(id, transport); },
-  });
-  transport.onclose = () => transports.delete(transport.sessionId!);
+  const method = (req.body as { method?: string })?.method;
 
-  const server = createMcpServer();
-  await server.connect(transport);
-  await transport.handleRequest(req, res, req.body);
+  if (method === "initialize") {
+    // Stateful: claude.ai sends initialize first, expects mcp-session-id back
+    let transport: StreamableHTTPServerTransport;
+    transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (id: string): void => { transports.set(id, transport); },
+    });
+    transport.onclose = () => transports.delete(transport.sessionId!);
+    const server = createMcpServer();
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+  } else {
+    // Stateless: AO and other clients that skip initialize and call tools/list directly
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    const server = createMcpServer();
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+  }
 });
 
 app.get("/mcp", async (req: Request, res: Response) => {
