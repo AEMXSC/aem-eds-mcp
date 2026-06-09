@@ -9,18 +9,24 @@ description: >
 
 # Happy Path Skill
 
-## MCP Servers Required
+## Skill Source
 
-This skill requires two MCP servers to be connected:
+Canonical skill definitions (always authoritative):
+- Migration score: `https://raw.githubusercontent.com/AdobeDevXSC/skills/main/plugins/aem/edge-delivery-services/skills/migration-score/SKILL.md`
+- Customer POV: `https://raw.githubusercontent.com/AdobeDevXSC/skills/main/plugins/aem/edge-delivery-services/skills/customer-pov/SKILL.md`
+
+## MCP Servers (Optional — enhances speed, not required)
 
 | Server | URL | Purpose |
 |--------|-----|---------|
-| **Happy Path MCP** | `https://happy-path-mcp-production.up.railway.app/mcp` | Migration scoring (web scraping + analysis) |
+| **Happy Path MCP** | `https://happy-path-mcp-production.up.railway.app/mcp` | Pre-computed scoring (faster) |
 | **Microsoft 365** | Built-in connector | SharePoint account data (M2C lists, ARR, scores) |
 
-**Happy Path MCP tools:**
+**If MCP tools are available:**
 - `migration_score(url, customer_name?)` → JSON score object
 - `migration_score_report(score_data, customer_name?)` → Markdown report
+
+**If MCP tools are NOT available (e.g. Adobe Enterprise plan):** execute natively using WebFetch — see Path B below.
 
 **Microsoft 365 MCP tools used:**
 - `sharepoint_search(query, site?)` → find files/pages
@@ -36,30 +42,48 @@ Matches the `migration-score` skill from [AdobeDevXSC/skills](https://github.com
 ### Step 0 — Check for existing score
 If `migration_score_output` is already in context for this customer, extract it and skip to Step 3.
 
-### Step 1 — Score the site (Happy Path MCP)
-Call the `migration_score` tool:
+### Step 1 — Score the site
+
+**Path A — Happy Path MCP available:**
 ```
-migration_score(
-  url: "<customer root URL>",
-  customer_name: "<name if known>"
-)
+migration_score(url: "<customer root URL>", customer_name: "<name if known>")
 ```
 
-The tool runs the full 11-step assessment internally:
-- Fetches sitemap → counts pages, detects locales, identifies template groups
-- Scrapes homepage + representative pages across template groups
-- Classifies every component into 6 block tiers
-- Applies risk modifiers (multi-locale, auth, personalization, large site, e-commerce)
-- Computes 0–100 score and ease label
-- Generates phase timeline (POC / Pilot / Scaled)
+**Path B — No MCP (execute natively with WebFetch):**
 
-### Step 2 — Generate markdown report (Happy Path MCP)
-```
-migration_score_report(
-  score_data: <full JSON from step 1>,
-  customer_name: "<name>"
-)
-```
+Claude performs the 11-step assessment directly:
+
+1. **Fetch sitemap** — try `<url>/sitemap.xml`, then `/sitemap_index.xml`. Count `<url>` entries for page count. Detect locale patterns (`/en/`, `/de/`, etc.). Identify template groups from depth-1 path segments.
+
+2. **Sample pages** — fetch homepage + up to 4 representative pages across detected template groups.
+
+3. **Classify each page's sections** into 6 tiers:
+   - **Adopt as-is** — nav, header, footer, hero, columns, cards, quote, embed (standard EDS blocks)
+   - **Customize** — carousel, accordion, tabs, banner, modal, table (need minor adaptation)
+   - **Custom net-new** — deeply nested (6+ levels), 20+ child divs, unrecognized patterns
+   - **Simple services** — YouTube/Vimeo embeds, Google Maps, simple forms, social widgets
+   - **Complex services** — Coveo/Algolia search, Adobe Target, Marketo, auth/login/SSO, checkout
+   - **SPA sections** — `__NEXT_DATA__`, `__NUXT__`, `data-reactroot`, `ng-version` detected
+
+4. **Apply risk signals** — multi-locale (+5), auth/SSO (+5), personalization (+3), 500+ pages (+3), e-commerce (+4). Max penalty 15 pts.
+
+5. **Compute score:**
+   - `complexRatio` = (custom + complex_service + spa) / total blocks
+   - Block penalty: High (ratio >0.40 or SPA or >2 complex services) = 50–60 pts; Medium = 25–45 pts; Low = 0–20 pts
+   - `score` = 100 − blockPenalty − riskPenalty (clamped 0–100)
+
+6. **Ease label:** 76–100 Easy · 51–75 Moderate · 26–50 Hard · 0–25 Very Hard
+
+7. **Phase timeline:**
+   - POC: 2–4 weeks, 5–10 representative pages
+   - Pilot: 4–8 weeks, 50–100 pages
+   - Scaled: based on total pages (≤100: 4–8wks, 100–500: 8–12wks, 500+: 12–20wks)
+
+### Step 2 — Generate markdown report
+
+**Path A:** Call `migration_score_report(score_data: <json>, customer_name: "<name>")`
+
+**Path B:** Format the results directly as a markdown report matching the canonical Happy Path template (score, ease label, block inventory table, complex ratio, risk factors, phase timeline, assumptions).
 
 ### Step 3 — Present the report
 
@@ -246,218 +270,3 @@ Scores are **intentionally conservative** — upper bound for customer expectati
 - Position EDS as evolution of AEM investment, not replacement
 - Tone, scale, and urgency adjust by customer profile and vertical
 
----
-
-## Adobe Enterprise Plan (No Custom MCP Connector)
-
-If the user is on an Adobe Enterprise claude.ai account where custom MCP connectors are blocked, generate an HTML artifact instead of calling MCP tools directly.
-
-The artifact calls `POST https://happy-path-mcp-production.up.railway.app/score` from the browser — CORS is open, no connector needed.
-
-When the user says "run migration-score on stantec.com" and no MCP tools are available, generate an artifact using this template. Replace `SITE_URL` and `CUSTOMER_NAME` with the actual values before generating.
-
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AEM Migration Score</title>
-<style>
-  :root{--red:#FA0F00;--dark:#2C2C2C;--mid:#6E6E6E;--border:#E1E1E1;--bg:#F8F8F8}
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--dark);font-size:14px}
-  header{background:var(--red);color:#fff;padding:14px 24px;display:flex;align-items:center;gap:12px}
-  header svg{width:34px;height:24px;flex-shrink:0}
-  header h1{font-size:16px;font-weight:600;letter-spacing:.01em}
-  header span{font-size:13px;opacity:.85;margin-left:auto}
-  main{max-width:860px;margin:24px auto;padding:0 16px;display:flex;flex-direction:column;gap:16px}
-  .card{background:#fff;border:1px solid var(--border);border-radius:4px;padding:20px 24px}
-  .card h2{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--mid);margin-bottom:14px}
-  .score-row{display:flex;align-items:center;gap:24px}
-  .score-num{font-size:64px;font-weight:700;line-height:1;color:var(--dark)}
-  .score-num.easy{color:#2DA44E}
-  .score-num.moderate{color:#0073E6}
-  .score-num.hard{color:#E8A000}
-  .score-num.very-hard{color:var(--red)}
-  .ease-badge{display:inline-block;padding:4px 12px;border-radius:3px;font-size:13px;font-weight:700;color:#fff;background:var(--dark)}
-  .ease-badge.easy{background:#2DA44E}
-  .ease-badge.moderate{background:#0073E6}
-  .ease-badge.hard{background:#E8A000}
-  .ease-badge.very-hard{background:var(--red)}
-  .score-meta{font-size:13px;color:var(--mid);line-height:1.6;margin-top:6px}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th{background:#F3F3F3;border-bottom:2px solid var(--border);padding:8px 10px;text-align:left;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--mid)}
-  td{padding:8px 10px;border-bottom:1px solid var(--border)}
-  tr:last-child td{border-bottom:none}
-  .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;background:#F3F3F3;color:var(--mid)}
-  .pill.high{background:#FEE9E7;color:#C9190B}
-  .phase{border-left:3px solid var(--red);padding:10px 14px;margin-bottom:10px;background:#fff}
-  .phase:last-child{margin-bottom:0}
-  .phase strong{display:block;font-size:13px;margin-bottom:4px}
-  .phase span{font-size:12px;color:var(--mid)}
-  .risk-item{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px}
-  .risk-item:last-child{border-bottom:none}
-  .risk-detail{color:var(--mid);font-size:12px;margin-top:2px}
-  .actions{display:flex;gap:10px;justify-content:flex-end}
-  button{padding:8px 16px;border:none;border-radius:3px;font-size:13px;font-weight:600;cursor:pointer}
-  .btn-primary{background:var(--red);color:#fff}
-  .btn-secondary{background:#F3F3F3;color:var(--dark);border:1px solid var(--border)}
-  #loading{text-align:center;padding:60px 0;color:var(--mid)}
-  .spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--red);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  .error{color:var(--red);padding:20px;text-align:center}
-  .assump{font-size:12px;color:var(--mid);line-height:1.6}
-  .assump li{margin-bottom:4px}
-  footer{text-align:center;padding:20px;font-size:11px;color:var(--mid)}
-</style>
-</head>
-<body>
-<header>
-  <svg viewBox="0 0 34 26" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M20.5 0H34V26L20.5 0Z" fill="white"/>
-    <path d="M13.5 0H0V26L13.5 0Z" fill="white"/>
-    <path d="M17 9.5L22.5 26H18.3L16.7 21H11.3L17 9.5Z" fill="white"/>
-  </svg>
-  <h1>AEM Happy Path — Migration Score</h1>
-  <span id="hdr-url"></span>
-</header>
-
-<main>
-  <div id="loading">
-    <div class="spinner"></div>
-    <div>Analyzing site — fetching sitemap, sampling pages, classifying blocks…</div>
-  </div>
-  <div id="report" hidden></div>
-</main>
-
-<footer>Adobe Experience Cloud &nbsp;·&nbsp; AEM XSC Happy Path &nbsp;·&nbsp; Scores are intentionally conservative (upper bound on migration effort)</footer>
-
-<script>
-const SCORE_URL = 'https://happy-path-mcp-production.up.railway.app/score';
-const SITE_URL = 'REPLACE_WITH_URL';
-const CUSTOMER_NAME = 'REPLACE_WITH_CUSTOMER';
-
-const easeClass = e => ({'Easy':'easy','Moderate':'moderate','Hard':'hard','Very Hard':'very-hard'}[e]||'hard');
-
-function renderReport(d) {
-  const inv = d.blockInventory;
-  const rows = [
-    ['Adopt as-is', inv.adopt, ''],
-    ['Customize', inv.customize, ''],
-    ['Custom net-new', inv.custom, 'high'],
-    ['Simple services', inv.simple_service, ''],
-    ['Complex services', inv.complex_service, 'high'],
-    ['SPA sections', inv.spa, 'high'],
-  ];
-  const phases = (d.phases||[]).map(p=>`
-    <div class="phase">
-      <strong>${p.name}</strong>
-      <span>${p.scope} &nbsp;·&nbsp; ${p.durationWeeks[0]}–${p.durationWeeks[1]} weeks</span>
-    </div>`).join('');
-  const risks = (d.riskFactors||[]).length
-    ? d.riskFactors.map(r=>`<div class="risk-item"><div><div>${r.name}</div><div class="risk-detail">${r.detail}</div></div><div>+${r.penalty} pts</div></div>`).join('')
-    : '<div class="risk-item"><span>No significant risk factors detected</span></div>';
-  const assumptions = (d.assumptions||[]).map(a=>`<li>${a}</li>`).join('');
-  const cls = easeClass(d.ease);
-  const date = new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
-
-  document.getElementById('report').innerHTML = `
-    <div class="card">
-      <h2>Migration Score &nbsp;·&nbsp; ${d.customer_name||CUSTOMER_NAME} &nbsp;·&nbsp; ${date}</h2>
-      <div class="score-row">
-        <div class="score-num ${cls}">${d.score}</div>
-        <div>
-          <div class="ease-badge ${cls}">${d.ease}</div>
-          <div class="score-meta">
-            <strong>${d.url||SITE_URL}</strong><br>
-            Complex block ratio: ${Math.round((inv.complexRatio||0)*100)}% &nbsp;·&nbsp; Total blocks sampled: ${inv.total}
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Block Inventory</h2>
-      <table>
-        <thead><tr><th>Tier</th><th>Count</th><th>Complexity</th></tr></thead>
-        <tbody>${rows.map(([tier,count,cls])=>`<tr><td>${tier}</td><td>${count}</td><td>${cls?`<span class="pill ${cls}">${cls==='high'?'High':'—'}</span>`:'<span class="pill">Standard</span>'}</td></tr>`).join('')}</tbody>
-      </table>
-    </div>
-
-    <div class="card">
-      <h2>Phase Timeline</h2>
-      ${phases||'<p style="color:var(--mid)">No phase data available</p>'}
-    </div>
-
-    ${d.riskFactors&&d.riskFactors.length?`<div class="card"><h2>Risk Factors</h2>${risks}</div>`:''}
-
-    <div class="card">
-      <h2>Assumptions</h2>
-      <ul class="assump">${assumptions}</ul>
-    </div>
-
-    <div class="actions">
-      <button class="btn-secondary" onclick="copyMarkdown()">Copy as Markdown</button>
-      <button class="btn-primary" onclick="alert('Ask Claude to generate a full customer POV using this score data.')">Generate Customer POV →</button>
-    </div>`;
-}
-
-function copyMarkdown() {
-  const d = window.__scoreData;
-  if (!d) return;
-  const inv = d.blockInventory;
-  const md = [
-    `# AEM Migration Score — ${d.customer_name||CUSTOMER_NAME}`,
-    `**Date:** ${new Date().toISOString().slice(0,10)}  `,
-    `**URL:** ${d.url||SITE_URL}  `,
-    `**Score:** ${d.score}/100 — **${d.ease}**`,
-    '',
-    '## Block Inventory',
-    '| Tier | Count |',
-    '|------|------:|',
-    `| Adopt as-is | ${inv.adopt} |`,
-    `| Customize | ${inv.customize} |`,
-    `| Custom net-new | ${inv.custom} |`,
-    `| Simple services | ${inv.simple_service} |`,
-    `| Complex services | ${inv.complex_service} |`,
-    `| SPA sections | ${inv.spa} |`,
-    `| **Total** | **${inv.total}** |`,
-    '',
-    `**Complex Block Ratio:** ${Math.round((inv.complexRatio||0)*100)}%`,
-    '',
-    '## Phase Timeline',
-    ...(d.phases||[]).map(p=>`**${p.name}** — ${p.scope} · ${p.durationWeeks[0]}–${p.durationWeeks[1]} weeks`),
-    '',
-    '## Assumptions',
-    ...(d.assumptions||[]).map(a=>`- ${a}`),
-  ].join('\n');
-  navigator.clipboard.writeText(md).then(()=>alert('Copied to clipboard!'));
-}
-
-(async () => {
-  document.getElementById('hdr-url').textContent = SITE_URL;
-  try {
-    const res = await fetch(SCORE_URL, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ url: SITE_URL, customer_name: CUSTOMER_NAME })
-    });
-    if (!res.ok) throw new Error(`Server returned ${res.status}`);
-    const data = await res.json();
-    window.__scoreData = data;
-    document.getElementById('loading').hidden = true;
-    document.getElementById('report').hidden = false;
-    renderReport(data);
-  } catch (err) {
-    document.getElementById('loading').innerHTML =
-      `<div class="error">Failed to score site: ${err.message}<br><small>${SITE_URL}</small></div>`;
-  }
-})();
-</script>
-</body>
-</html>
-```
-
-**How to use this template:**
-When generating the artifact, replace `REPLACE_WITH_URL` with the actual customer URL and `REPLACE_WITH_CUSTOMER` with the customer name. The artifact auto-runs on load and renders the full scored report with Adobe branding.
