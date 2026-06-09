@@ -31,11 +31,15 @@ const app = express();
 app.set("trust proxy", 1);
 app.use(express.json());
 
-app.use((_req, res, next) => {
+app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, MCP-Session-Id");
-  if (_req.method === "OPTIONS") { res.status(204).end(); return; }
+  if (req.method === "OPTIONS") { res.status(204).end(); return; }
+  // Temporary: log incoming MCP requests to diagnose AO platform issues
+  if (req.path === "/mcp") {
+    process.stderr.write(`[req] ${req.method} /mcp accept="${req.headers["accept"] ?? ""}" session="${req.headers["mcp-session-id"] ?? ""}"\n`);
+  }
   next();
 });
 
