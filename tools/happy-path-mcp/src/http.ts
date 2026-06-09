@@ -5,6 +5,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { SERVER_VERSION, TOOLS, handleTool, type Args } from "./tools.js";
+import { scoreRoute } from "./rest.js";
 
 const PORT = parseInt(process.env.PORT ?? "3002", 10);
 const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
@@ -112,6 +113,10 @@ app.delete("/mcp", (req: Request, res: Response) => {
   sessions.delete(sessionId);
   res.status(204).end();
 });
+
+// ─── REST endpoint (Adobe Enterprise artifact workaround — plain JSON, no SSE) ─
+
+app.post("/score", express.json(), scoreRoute);
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 
