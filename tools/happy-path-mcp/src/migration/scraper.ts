@@ -19,12 +19,22 @@ export interface SiteData {
 }
 
 const FETCH_TIMEOUT_MS = 15_000;
+const MAX_RESPONSE_BYTES = 5 * 1024 * 1024; // 5MB cap per page
 const LOCALE_PATTERN = /^\/(en|de|fr|ja|es|pt|it|nl|ko|zh|ar|he|ru|pl|sv|da|fi|no|tr|cs|hu|ro|uk|vi|th|id|ms|bg|hr|sk|sl|lt|lv|et)\b/i;
 const MAX_SAMPLE_PAGES = 5;
 
-function normalizeUrl(raw: string): string {
+// SSRF: block private/loopback ranges and non-http(s) protocols
+const BLOCKED_HOSTNAMES = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.0\.0\.0|169\.254\.|::1|fc00:|fd)/i;
+
+export function validatePublicUrl(raw: string): string {
   const url = raw.startsWith("http") ? raw : `https://${raw}`;
   const parsed = new URL(url);
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error(`Unsupported protocol: ${parsed.protocol}`);
+  }
+  if (BLOCKED_HOSTNAMES.test(parsed.hostname)) {
+    throw new Error(`Blocked host: ${parsed.hostname}`);
+  }
   return `${parsed.protocol}//${parsed.host}`;
 }
 
@@ -39,6 +49,14 @@ async function fetchWithTimeout(url: string, timeoutMs = FETCH_TIMEOUT_MS): Prom
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function readBounded(res: Response): Promise<string> {
+  const contentLength = parseInt(res.headers.get("content-length") ?? "0", 10);
+  if (contentLength > MAX_RESPONSE_BYTES) return "";
+  const buffer = await res.arrayBuffer();
+  if (buffer.byteLength > MAX_RESPONSE_BYTES) return "";
+  return new TextDecoder().decode(buffer);
 }
 
 async function parseSitemap(xml: string): Promise<string[]> {
@@ -65,7 +83,7 @@ async function analyzeSitemap(baseUrl: string): Promise<SiteStats> {
     try {
       const res = await fetchWithTimeout(candidate);
       if (res.ok) {
-        const xml = await res.text();
+        const xml = await readBounded(res);
         // Check if it's a sitemap index — if so, fetch first child sitemap
         const childSitemaps = xml.match(/<sitemap>/gi);
         if (childSitemaps && childSitemaps.length > 0) {
@@ -76,7 +94,7 @@ async function analyzeSitemap(baseUrl: string): Promise<SiteStats> {
             try {
               const childRes = await fetchWithTimeout(childUrl);
               if (childRes.ok) {
-                const childXml = await childRes.text();
+                const childXml = await readBounded(childRes);
                 allUrls.push(...await parseSitemap(childXml));
               }
             } catch { /* skip */ }
@@ -145,7 +163,7 @@ function pickSampleUrls(baseUrl: string, stats: SiteStats): string[] {
 }
 
 export async function scrapeSite(rawUrl: string): Promise<SiteData> {
-  const baseUrl = normalizeUrl(rawUrl);
+  const baseUrl = validatePublicUrl(rawUrl);
   const stats = await analyzeSitemap(baseUrl);
   const sampleUrls = pickSampleUrls(baseUrl, stats);
 
@@ -153,7 +171,7 @@ export async function scrapeSite(rawUrl: string): Promise<SiteData> {
   for (const url of sampleUrls) {
     try {
       const res = await fetchWithTimeout(url);
-      const html = res.ok ? await res.text() : "";
+      const html = res.ok ? await readBounded(res) : "";
       samples.push({ url, html, statusCode: res.status });
     } catch {
       samples.push({ url, html: "", statusCode: 0 });

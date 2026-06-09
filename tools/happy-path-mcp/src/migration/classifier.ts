@@ -161,7 +161,7 @@ export function analyzePageHtml(url: string, html: string): PageSignals {
   } else {
     // Parse DOM and analyze main content sections
     try {
-      const dom = new JSDOM(html, { runScripts: "outside-only" });
+      const dom = new JSDOM(html);
       const doc = dom.window.document;
 
       // Use <main> first, fallback to <body>
@@ -208,8 +208,7 @@ export function aggregateInventory(pages: PageSignals[]): BlockInventory {
         counts[tier]++;
       }
     }
-    // Add service-level signals directly
-    if (page.isSpa && !seen.has("spa")) counts.spa++;
+    // Auth signal may not produce a classified section — add it directly if missed
     if (page.hasAuth && !seen.has("complex_service")) counts.complex_service++;
   }
 

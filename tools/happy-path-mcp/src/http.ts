@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 import express, { type Request, type Response, type NextFunction } from "express";
+import { randomBytes } from "node:crypto";
 import { SERVER_VERSION, TOOLS, handleTool, type Args } from "./tools.js";
 
 const PORT = parseInt(process.env.PORT ?? "3002", 10);
 
 const app = express();
 app.set("trust proxy", 1);
-app.use("/mcp", express.json());
+app.use("/mcp", express.json({ limit: "200kb" }));
+app.use("/token", express.urlencoded({ extended: false }));
+app.use("/token", express.json());
 
 // CORS
 app.use((_req: Request, res: Response, next: NextFunction) => {
@@ -17,13 +20,71 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
+// ─── Pass-through OAuth (no real auth — server is public) ─────────────────────
+// Claude.ai requires OAuth handshake on all MCP connectors.
+// Since this server needs no authentication, we complete the flow automatically.
+
+const pendingCodes = new Map<string, string>(); // code → redirect_uri
+
+app.get("/.well-known/oauth-authorization-server", (_req: Request, res: Response) => {
+  const base = process.env.PUBLIC_URL ?? `http://localhost:${PORT}`;
+  res.json({
+    issuer: base,
+    authorization_endpoint: `${base}/authorize`,
+    token_endpoint: `${base}/token`,
+    response_types_supported: ["code"],
+    grant_types_supported: ["authorization_code"],
+    code_challenge_methods_supported: ["S256"],
+    scopes_supported: ["openid"],
+    resource: base,
+  });
+});
+
+app.get("/.well-known/oauth-protected-resource", (_req: Request, res: Response) => {
+  const base = process.env.PUBLIC_URL ?? `http://localhost:${PORT}`;
+  res.json({ resource: base, authorization_servers: [base] });
+});
+
+// Auto-approve: immediately redirect back with a code — no login page needed
+app.get("/authorize", (req: Request, res: Response) => {
+  const { redirect_uri, state } = req.query as Record<string, string>;
+  if (!redirect_uri) { res.status(400).send("Missing redirect_uri"); return; }
+
+  const code = randomBytes(16).toString("hex");
+  pendingCodes.set(code, redirect_uri);
+  // expire codes after 5 minutes
+  setTimeout(() => pendingCodes.delete(code), 5 * 60 * 1000);
+
+  const redirectUrl = new URL(redirect_uri);
+  redirectUrl.searchParams.set("code", code);
+  if (state) redirectUrl.searchParams.set("state", state);
+  res.redirect(redirectUrl.toString());
+});
+
+// Issue a static bearer token — no secret needed since server is open
+app.post("/token", (req: Request, res: Response) => {
+  const { code, grant_type } = req.body as Record<string, string>;
+  if (grant_type !== "authorization_code" || !code || !pendingCodes.has(code)) {
+    res.status(400).json({ error: "invalid_grant" });
+    return;
+  }
+  pendingCodes.delete(code);
+  // Static token — accepted but not checked (all requests are allowed)
+  res.json({
+    access_token: "happy-path-open-access",
+    token_type: "bearer",
+    expires_in: 3600 * 24 * 365, // 1 year
+    scope: "openid",
+  });
+});
+
 // ─── JSON-RPC helpers ─────────────────────────────────────────────────────────
 
 function ok(id: unknown, result: unknown) {
   return { jsonrpc: "2.0", id, result };
 }
 
-function err(id: unknown, code: number, message: string) {
+function errRpc(id: unknown, code: number, message: string) {
   return { jsonrpc: "2.0", id, error: { code, message } };
 }
 
@@ -33,7 +94,7 @@ app.post("/mcp", async (req: Request, res: Response) => {
   const body = req.body as { jsonrpc?: string; id?: unknown; method?: string; params?: unknown };
 
   if (!body || body.jsonrpc !== "2.0" || !body.method) {
-    res.status(400).json(err(body?.id ?? null, -32600, "Invalid Request"));
+    res.status(400).json(errRpc(body?.id ?? null, -32600, "Invalid Request"));
     return;
   }
 
@@ -63,19 +124,19 @@ app.post("/mcp", async (req: Request, res: Response) => {
 
       case "tools/call": {
         const p = params as { name?: string; arguments?: Args } | undefined;
-        if (!p?.name) { res.json(err(id, -32602, "Missing tool name")); break; }
+        if (!p?.name) { res.json(errRpc(id, -32602, "Missing tool name")); break; }
         const result = await handleTool(p.name, p.arguments ?? {});
         res.json(ok(id, result));
         break;
       }
 
       default:
-        res.json(err(id, -32601, `Method not found: ${method}`));
+        res.json(errRpc(id, -32601, `Method not found: ${method}`));
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     process.stderr.write(`[mcp] error in ${method}: ${msg}\n`);
-    res.json(err(id, -32603, `Internal error: ${msg}`));
+    res.json(errRpc(id, -32603, `Internal error: ${msg}`));
   }
 });
 

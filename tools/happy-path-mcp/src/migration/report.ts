@@ -79,7 +79,7 @@ ${assumptionsList}
 
 ## Next Steps
 
-1. **Refine scoring** — run full block inventory across all ${phases[2]?.scope ?? "site"} pages
+1. **Refine scoring** — run full block inventory across the complete site (${phases[2]?.durationWeeks ? `est. ${phases[2].durationWeeks[0]}–${phases[2].durationWeeks[1]} weeks` : "see timeline above"})
 2. **Generate POV** — combine with customer data via \`customer_pov\` workflow
 3. **Generate PowerPoint** — run \`/generate-pptx\` to produce an Adobe-branded deck
 `;

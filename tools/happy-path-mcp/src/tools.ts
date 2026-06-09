@@ -66,7 +66,15 @@ export async function handleTool(name: string, args: Args): Promise<ReturnType<t
       const url = args.url as string | undefined;
       if (!url) return mcpError("url is required");
 
+      // Validate URL before network access (SSRF prevention)
       let siteData;
+      try {
+        const { validatePublicUrl } = await import("./migration/scraper.js");
+        validatePublicUrl(url); // throws on private IPs / bad protocol
+      } catch (err) {
+        return mcpError(`Invalid URL: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
       try {
         siteData = await scrapeSite(url);
       } catch (err) {
