@@ -7,10 +7,26 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { SERVER_VERSION, TOOLS, handleTool, type Args } from "./tools.js";
 
 const PORT = parseInt(process.env.PORT ?? "3002", 10);
+const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
-// ─── Session store (stateful mode — required for mcp-session-id header) ───────
+// ─── Session store with TTL ───────────────────────────────────────────────────
 
-const transports = new Map<string, StreamableHTTPServerTransport>();
+interface SessionEntry {
+  transport: StreamableHTTPServerTransport;
+  lastSeen: number;
+}
+
+const sessions = new Map<string, SessionEntry>();
+
+setInterval(() => {
+  const cutoff = Date.now() - SESSION_TTL_MS;
+  for (const [id, entry] of sessions) {
+    if (entry.lastSeen < cutoff) {
+      entry.transport.close();
+      sessions.delete(id);
+    }
+  }
+}, 5 * 60 * 1000);
 
 function createMcpServer() {
   const server = new Server(
@@ -36,59 +52,64 @@ app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, MCP-Session-Id");
   if (req.method === "OPTIONS") { res.status(204).end(); return; }
-  // Temporary: log incoming MCP requests to diagnose AO platform issues
-  if (req.path === "/mcp") {
-    const body = JSON.stringify(req.body ?? "").slice(0, 300);
-    process.stderr.write(`[req] ${req.method} /mcp accept="${req.headers["accept"] ?? ""}" ct="${req.headers["content-type"] ?? ""}" session="${req.headers["mcp-session-id"] ?? ""}" body=${body}\n`);
-  }
   next();
 });
 
-// ─── MCP Streamable HTTP (stateful) ──────────────────────────────────────────
+// ─── MCP Streamable HTTP ──────────────────────────────────────────────────────
 
 app.post("/mcp", async (req: Request, res: Response) => {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
-  // Existing session — route to stored transport
+  // Existing session
   if (sessionId) {
-    const existing = transports.get(sessionId);
-    if (!existing) { res.status(404).json({ error: "Session not found" }); return; }
-    await existing.handleRequest(req, res, req.body);
+    const entry = sessions.get(sessionId);
+    if (!entry) { res.status(404).json({ error: "Session not found" }); return; }
+    entry.lastSeen = Date.now();
+    await entry.transport.handleRequest(req, res, req.body);
     return;
   }
 
   const method = (req.body as { method?: string })?.method;
 
   if (method === "initialize") {
-    // Stateful: claude.ai sends initialize first, expects mcp-session-id back
+    // Stateful: claude.ai sends initialize first and expects mcp-session-id back
     let transport: StreamableHTTPServerTransport;
     transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
-      onsessioninitialized: (id: string): void => { transports.set(id, transport); },
+      onsessioninitialized: (id: string): void => {
+        sessions.set(id, { transport, lastSeen: Date.now() });
+        transport.onclose = () => sessions.delete(id); // capture `id`, not sessionId getter
+      },
     });
-    transport.onclose = () => transports.delete(transport.sessionId!);
     const server = createMcpServer();
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
   } else {
-    // Stateless: AO and other clients that skip initialize and call tools/list directly
+    // Stateless: AO and other clients that skip initialize (e.g. direct tools/list)
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     const server = createMcpServer();
-    await server.connect(transport);
-    await transport.handleRequest(req, res, req.body);
+    try {
+      await server.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+    } finally {
+      await transport.close();
+    }
   }
 });
 
 app.get("/mcp", async (req: Request, res: Response) => {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
-  const transport = sessionId ? transports.get(sessionId) : undefined;
-  if (!transport) { res.status(404).json({ error: "Session not found" }); return; }
-  await transport.handleRequest(req, res);
+  const entry = sessionId ? sessions.get(sessionId) : undefined;
+  if (!entry) { res.status(404).json({ error: "Session not found" }); return; }
+  entry.lastSeen = Date.now();
+  await entry.transport.handleRequest(req, res);
 });
 
 app.delete("/mcp", (req: Request, res: Response) => {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
-  if (sessionId) transports.delete(sessionId);
+  if (!sessionId || !sessions.has(sessionId)) { res.status(404).end(); return; }
+  sessions.get(sessionId)!.transport.close();
+  sessions.delete(sessionId);
   res.status(204).end();
 });
 
@@ -105,5 +126,6 @@ app.listen(PORT, "0.0.0.0", () => {
 });
 
 process.on("unhandledRejection", (reason) => {
-  process.stderr.write(`[happy-path-mcp] Unhandled rejection: ${reason}\n`);
+  const detail = reason instanceof Error ? reason.stack : String(reason);
+  process.stderr.write(`[happy-path-mcp] Unhandled rejection: ${detail}\n`);
 });
