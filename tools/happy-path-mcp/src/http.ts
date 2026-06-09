@@ -38,7 +38,8 @@ app.use((req, res, next) => {
   if (req.method === "OPTIONS") { res.status(204).end(); return; }
   // Temporary: log incoming MCP requests to diagnose AO platform issues
   if (req.path === "/mcp") {
-    process.stderr.write(`[req] ${req.method} /mcp accept="${req.headers["accept"] ?? ""}" session="${req.headers["mcp-session-id"] ?? ""}"\n`);
+    const body = JSON.stringify(req.body ?? "").slice(0, 300);
+    process.stderr.write(`[req] ${req.method} /mcp accept="${req.headers["accept"] ?? ""}" ct="${req.headers["content-type"] ?? ""}" session="${req.headers["mcp-session-id"] ?? ""}" body=${body}\n`);
   }
   next();
 });
