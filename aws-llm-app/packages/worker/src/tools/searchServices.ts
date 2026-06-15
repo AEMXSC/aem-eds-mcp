@@ -124,7 +124,8 @@ function formatVolume(n: number): string {
 }
 
 async function getLiveSemrushKeywords(query: string, apiKey: string, kv: KVNamespace): Promise<string[]> {
-  const cacheKey = `cache:semrush:${query.toLowerCase().trim().slice(0, 100)}`
+  if (!apiKey) return []
+  const cacheKey = `cache:semrush:${encodeURIComponent(query.toLowerCase().trim().slice(0, 100))}`
   const cached = await kv.get<string[]>(cacheKey, 'json')
   if (cached) return cached
 
@@ -163,8 +164,7 @@ async function getLiveSemrushKeywords(query: string, apiKey: string, kv: KVNames
       keywords = []
     }
     if (keywords.length) {
-      // Fire-and-forget: don't block the response on the write
-      void kv.put(cacheKey, JSON.stringify(keywords), { expirationTtl: 86400 })
+      await kv.put(cacheKey, JSON.stringify(keywords), { expirationTtl: 86400 })
     }
     return keywords
   } catch {
@@ -181,7 +181,12 @@ export async function searchServices(
   limit = 4
 ): Promise<ServiceSummary[]> {
   // Result-level cache: identical queries skip all work (~5 ms vs ~4 s)
-  const resultCacheKey = `cache:search:${query.toLowerCase().trim().slice(0, 100)}:${category ?? '_'}:${limit}`
+  const resultCacheKey = [
+    'cache:search',
+    encodeURIComponent(query.toLowerCase().trim().slice(0, 100)),
+    encodeURIComponent(category ?? '_'),
+    String(limit),
+  ].join(':')
   const cachedResult = await env.AWS_SERVICES.get<ServiceSummary[]>(resultCacheKey, 'json')
   if (cachedResult) return cachedResult
 
@@ -219,7 +224,6 @@ export async function searchServices(
     cta_url: r.cta_url,
   }))
 
-  // Cache result for 1 hour; fire-and-forget
-  void env.AWS_SERVICES.put(resultCacheKey, JSON.stringify(results), { expirationTtl: 3600 })
+  await env.AWS_SERVICES.put(resultCacheKey, JSON.stringify(results), { expirationTtl: 3600 })
   return results
 }
