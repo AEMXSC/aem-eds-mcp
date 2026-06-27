@@ -40,7 +40,7 @@ function escapeHtml(str: string): string {
 }
 
 /**
- * Returns a visually stunning HTML dashboard page.
+ * Returns a visually stunning Adobe Spectrum styled HTML dashboard page.
  */
 export function renderDashboard(): string {
   const db = getDbData();
@@ -65,22 +65,23 @@ export function renderDashboard(): string {
     const isError = e.status >= 400;
     const isBlock = e.status === 400;
     const isWarn = e.status === 200 && db.policy_hits.some(h => h.correlation_id === e.correlation_id && h.action === 'warn');
-    const statusClass = isBlock ? 'status-error' : isWarn ? 'status-warn' : isError ? 'status-error' : 'status-ok';
+    const statusClass = isBlock ? 'status-block' : isWarn ? 'status-warn' : isError ? 'status-block' : 'status-allow';
     const actionText = isBlock ? 'Blocked' : isWarn ? 'Warned' : 'Allowed';
+    const cleanId = escapeHtml(e.correlation_id);
     return `
-      <tr class="log-row" data-id="${e.correlation_id}" data-action="${actionText.toLowerCase()}" data-model="${e.model.toLowerCase()}" data-timestamp="${e.timestamp}">
-        <td><a href="#" onclick="showRequestDetail('${e.correlation_id}')" class="detail-link"><code>${e.correlation_id.substring(0, 8)}</code></a></td>
+      <tr class="log-row" data-id="${cleanId}" data-action="${actionText.toLowerCase()}" data-model="${escapeHtml(e.model.toLowerCase())}" data-timestamp="${e.timestamp}">
+        <td><button onclick="showRequestDetail('${cleanId}')" class="detail-link"><code>${cleanId.substring(0, 8)}</code></button></td>
         <td class="time-cell" data-val="${e.timestamp}">${new Date(e.timestamp).toLocaleString()}</td>
-        <td><code>${e.model}</code></td>
-        <td><span class="status-badge ${statusClass}">${e.status} (${actionText})</span></td>
+        <td><code>${escapeHtml(e.model)}</code></td>
+        <td><span class="status-indicator ${statusClass}">${e.status} (${actionText})</span></td>
         <td>${e.latency_ms}ms</td>
       </tr>
     `;
   }).reverse().join('');
 
-  // Generate policy hit rows
+  // Generate policy hit rows for the side timeline
   const policyRows = db.policy_hits.slice(-15).reverse().map(h => {
-    const actionClass = h.action === 'block' ? 'action-block' : 'action-warn';
+    const actionClass = h.action === 'block' ? 'badge-block' : 'badge-warn';
     return `
       <div class="activity-card">
         <div class="activity-header">
@@ -88,8 +89,8 @@ export function renderDashboard(): string {
           <span class="activity-time">${new Date(h.timestamp).toLocaleTimeString()}</span>
         </div>
         <div class="activity-body">
-          <p><strong>Rule:</strong> <code>${h.rule_id}</code></p>
-          <p class="matched-val"><strong>Details:</strong> ${escapeHtml(h.matched_value || 'Sensitive scan match warning')}</p>
+          <p>Rule: <code>${escapeHtml(h.rule_id)}</code></p>
+          <p class="matched-val">${escapeHtml(h.matched_value || 'Sensitive signature matched')}</p>
         </div>
       </div>
     `;
@@ -98,20 +99,28 @@ export function renderDashboard(): string {
   // Generate Policy Manager list rows
   const rules = db.policy_rules || [];
   const rulesRows = rules.map(r => {
-    const modeClass = r.mode === 'enforce' ? 'status-error' : r.mode === 'warn' ? 'status-warn' : 'status-ok';
+    const modeClass = r.mode === 'enforce' ? 'status-block' : r.mode === 'warn' ? 'status-warn' : 'status-allow';
     const lastMatched = r.last_matched_at ? new Date(r.last_matched_at).toLocaleString() : 'Never';
+    const cleanId = escapeHtml(r.id);
+    const cleanName = escapeHtml(r.name);
+    const cleanPattern = escapeHtml(r.pattern);
+    const cleanMode = escapeHtml(r.mode);
+    const cleanType = escapeHtml(r.type);
+    const cleanDesc = escapeHtml(r.description || '');
+    const cleanScope = escapeHtml(r.scope || 'repo');
+
     return `
-      <tr id="rule-row-${r.id}">
-        <td><strong>${escapeHtml(r.name)}</strong></td>
-        <td><code>${escapeHtml(r.pattern)}</code></td>
-        <td><span class="status-badge ${modeClass}">${r.mode.toUpperCase()}</span></td>
-        <td><code>${r.type}</code></td>
-        <td>${r.scope || 'repo'}</td>
+      <tr id="rule-row-${cleanId}">
+        <td><strong>${cleanName}</strong></td>
+        <td><code>${cleanPattern}</code></td>
+        <td><span class="status-indicator ${modeClass}">${cleanMode.toUpperCase()}</span></td>
+        <td><code>${cleanType}</code></td>
+        <td>${cleanScope}</td>
         <td><span class="count-badge">${r.hit_count || 0}</span></td>
         <td><small class="time-text">${lastMatched}</small></td>
         <td>
-          <button class="btn-action edit" onclick="openEditRuleModal('${r.id}', '${escapeHtml(r.name)}', '${escapeHtml(r.pattern)}', '${r.mode}', '${r.type}', '${escapeHtml(r.description || '')}', '${r.scope || 'repo'}')">Edit</button>
-          <button class="btn-action delete" onclick="deleteRule('${r.id}')">Delete</button>
+          <button class="spectrum-link" onclick="openEditRuleModal('${cleanId}', '${cleanName}', '${cleanPattern}', '${cleanMode}', '${cleanType}', '${cleanDesc}', '${cleanScope}')">Edit</button>
+          <button class="spectrum-link delete" onclick="deleteRule('${cleanId}')">Delete</button>
         </td>
       </tr>
     `;
@@ -124,18 +133,22 @@ export function renderDashboard(): string {
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>ccr Private Gateway Admin Console</title>
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
       <style>
         :root {
-          --bg-dark: #0f172a;
-          --bg-card: rgba(30, 41, 59, 0.7);
-          --accent-primary: #6366f1;
-          --accent-success: #10b981;
-          --accent-warning: #f59e0b;
-          --accent-error: #ef4444;
-          --text-main: #f8fafc;
-          --text-muted: #94a3b8;
-          --border: rgba(148, 163, 184, 0.1);
+          /* Adobe Spectrum Darkest Palette Tokens */
+          --spectrum-bg: #1e1e1e;
+          --spectrum-panel: #262626;
+          --spectrum-border: #323232;
+          --spectrum-accent-blue: #1473e6;
+          --spectrum-accent-blue-hover: #0d66d0;
+          --spectrum-accent-red: #d7373f;
+          --spectrum-accent-orange: #df7b00;
+          --spectrum-accent-green: #12805c;
+          
+          --text-primary: #e1e1e1;
+          --text-secondary: #9d9d9d;
+          --text-disabled: #6e6e6e;
         }
 
         * {
@@ -145,215 +158,353 @@ export function renderDashboard(): string {
         }
 
         body {
-          font-family: 'Inter', sans-serif;
-          background-color: var(--bg-dark);
-          color: var(--text-main);
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          background-color: var(--spectrum-bg);
+          color: var(--text-primary);
           min-height: 100vh;
-          padding: 2rem;
-          background-image: radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.05) 0%, transparent 40%),
-                            radial-gradient(circle at 90% 80%, rgba(16, 185, 129, 0.05) 0%, transparent 40%);
+          padding: 2.5rem;
+          line-height: 1.5;
         }
 
         header {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          margin-bottom: 2.5rem;
-          border-bottom: 1px solid var(--border);
-          padding-bottom: 1.5rem;
+          margin-bottom: 2rem;
+          border-bottom: 1px solid var(--spectrum-border);
+          padding-bottom: 1.25rem;
         }
 
         .logo {
           font-family: 'Outfit', sans-serif;
-          font-size: 2rem;
+          font-size: 1.35rem;
           font-weight: 700;
-          background: linear-gradient(135deg, var(--accent-primary), #a78bfa);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+          color: #ffffff;
         }
 
-        .nav-links a {
-          color: var(--text-muted);
-          text-decoration: none;
-          margin-left: 1.5rem;
-          font-weight: 500;
-          padding-bottom: 0.25rem;
-          transition: color 0.2s ease, border-color 0.2s ease;
+        /* Adobe Spectrum Tabs */
+        .nav-tabs {
+          display: flex;
+          gap: 1.5rem;
+        }
+
+        .tab-btn {
+          background: transparent;
+          border: none;
+          color: var(--text-secondary);
+          font-family: inherit;
+          font-size: 0.875rem;
+          font-weight: 600;
+          padding: 0.5rem 0;
           cursor: pointer;
+          position: relative;
+          transition: color 0.15s ease;
+          text-decoration: none;
         }
 
-        .nav-links a:hover, .nav-links a.active {
-          color: var(--text-main);
-          border-bottom: 2px solid var(--accent-primary);
+        .tab-btn:hover {
+          color: #ffffff;
         }
 
+        .tab-btn.active {
+          color: var(--spectrum-accent-blue);
+        }
+
+        .tab-btn.active::after {
+          content: '';
+          position: absolute;
+          bottom: -21px;
+          left: 0;
+          width: 100%;
+          height: 2px;
+          background-color: var(--spectrum-accent-blue);
+        }
+
+        .ciso-link {
+          color: var(--text-secondary);
+          text-decoration: none;
+          font-size: 0.875rem;
+          font-weight: 600;
+          padding: 0.5rem 0;
+          transition: color 0.15s ease;
+        }
+
+        .ciso-link:hover {
+          color: #ffffff;
+        }
+
+        /* Metric Columns (Spectrum Layout) */
         .grid-metrics {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-          gap: 1.5rem;
-          margin-bottom: 2.5rem;
+          grid-template-columns: repeat(4, 1fr);
+          border: 1px solid var(--spectrum-border);
+          background-color: var(--spectrum-panel);
+          border-radius: 4px;
+          margin-bottom: 2rem;
+        }
+
+        @media (max-width: 900px) {
+          .grid-metrics {
+            grid-template-columns: repeat(2, 1fr);
+          }
+        }
+
+        @media (max-width: 500px) {
+          .grid-metrics {
+            grid-template-columns: 1fr;
+          }
         }
 
         .metric-card {
-          background: var(--bg-card);
-          border: 1px solid var(--border);
-          border-radius: 12px;
           padding: 1.5rem;
-          backdrop-filter: blur(12px);
-          transition: transform 0.2s ease, border-color 0.2s ease;
+          border-right: 1px solid var(--spectrum-border);
         }
 
-        .metric-card:hover {
-          transform: translateY(-2px);
-          border-color: rgba(99, 102, 241, 0.3);
+        .metric-card:last-child {
+          border-right: none;
         }
 
         .metric-title {
-          font-size: 0.875rem;
-          color: var(--text-muted);
-          font-weight: 500;
+          font-size: 0.75rem;
+          color: var(--text-secondary);
+          font-weight: 700;
           text-transform: uppercase;
-          letter-spacing: 0.05em;
+          letter-spacing: 0.06em;
           margin-bottom: 0.5rem;
         }
 
         .metric-value {
-          font-size: 2rem;
-          font-weight: 700;
-          font-family: 'Outfit', sans-serif;
+          font-size: 1.75rem;
+          font-weight: 600;
+          color: #ffffff;
         }
 
         .metric-value.savings {
-          color: var(--accent-success);
+          color: var(--spectrum-accent-green);
         }
 
         .metric-value.blocked {
-          color: var(--accent-error);
+          color: var(--spectrum-accent-red);
         }
 
+        /* Main panels */
         .grid-content {
           display: grid;
-          grid-template-columns: 2fr 1fr;
+          grid-template-columns: 2.3fr 1fr;
           gap: 2rem;
         }
 
-        @media (max-width: 900px) {
+        @media (max-width: 950px) {
           .grid-content {
             grid-template-columns: 1fr;
           }
         }
 
-        .section-card {
-          background: var(--bg-card);
-          border: 1px solid var(--border);
-          border-radius: 16px;
+        .panel-card {
+          background-color: var(--spectrum-panel);
+          border: 1px solid var(--spectrum-border);
+          border-radius: 4px;
           padding: 1.5rem;
-          backdrop-filter: blur(12px);
-          margin-bottom: 2rem;
         }
 
-        .section-title {
-          font-family: 'Outfit', sans-serif;
-          font-size: 1.25rem;
+        .panel-title {
+          font-size: 1rem;
+          font-weight: 700;
           margin-bottom: 1.25rem;
-          font-weight: 600;
+          letter-spacing: -0.01em;
+          color: #ffffff;
           display: flex;
           justify-content: space-between;
           align-items: center;
         }
 
-        /* Filter Controls */
+        /* Spectrum Forms & Filters */
         .filter-bar {
           display: flex;
           flex-wrap: wrap;
           gap: 1rem;
-          margin-bottom: 1rem;
-          background: rgba(15, 23, 42, 0.4);
+          margin-bottom: 1.25rem;
           padding: 1rem;
-          border-radius: 8px;
-          border: 1px solid var(--border);
+          border-radius: 4px;
+          background-color: var(--spectrum-bg);
+          border: 1px solid var(--spectrum-border);
           align-items: center;
         }
 
         .filter-group {
           display: flex;
           flex-direction: column;
-          gap: 0.25rem;
+          gap: 0.35rem;
         }
 
         .filter-group label {
-          font-size: 0.75rem;
-          color: var(--text-muted);
-          font-weight: 500;
+          font-size: 0.72rem;
+          color: var(--text-secondary);
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
         }
 
-        .filter-input {
-          background: rgba(30, 41, 59, 0.9);
-          border: 1px solid var(--border);
-          color: var(--text-main);
-          padding: 0.4rem 0.6rem;
-          border-radius: 6px;
-          font-size: 0.875rem;
+        .spectrum-input {
+          background-color: var(--spectrum-panel);
+          border: 1px solid var(--spectrum-border);
+          color: var(--text-primary);
+          padding: 0.45rem 0.75rem;
+          border-radius: 4px;
+          font-family: inherit;
+          font-size: 0.85rem;
           outline: none;
+          min-width: 140px;
         }
 
-        .filter-input:focus {
-          border-color: var(--accent-primary);
+        .spectrum-input:focus {
+          border-color: var(--spectrum-accent-blue);
         }
 
+        /* Spectrum Tables */
         table {
           width: 100%;
           border-collapse: collapse;
           text-align: left;
         }
 
-        th, td {
-          padding: 0.75rem 1rem;
-          border-bottom: 1px solid var(--border);
-        }
-
         th {
-          color: var(--text-muted);
-          font-weight: 500;
-          font-size: 0.875rem;
+          color: var(--text-secondary);
+          font-weight: 700;
+          font-size: 0.75rem;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          padding: 0.75rem 1rem;
+          border-bottom: 2px solid var(--spectrum-border);
+          background-color: var(--spectrum-panel);
         }
 
         td {
-          font-size: 0.9375rem;
+          padding: 0.75rem 1rem;
+          border-bottom: 1px solid var(--spectrum-border);
+          font-size: 0.875rem;
+          vertical-align: middle;
+        }
+
+        tr.log-row:hover {
+          background-color: rgba(255, 255, 255, 0.02);
         }
 
         code {
           font-family: monospace;
-          background: rgba(0, 0, 0, 0.2);
-          padding: 0.2rem 0.4rem;
+          background-color: rgba(0,0,0,0.3);
+          padding: 0.15rem 0.35rem;
           border-radius: 4px;
-          font-size: 0.875rem;
+          color: #c792ea;
+          font-size: 0.825rem;
         }
 
-        .status-badge {
-          display: inline-block;
-          padding: 0.25rem 0.5rem;
-          border-radius: 6px;
+        /* Spectrum Status Indicators */
+        .status-indicator {
+          display: inline-flex;
+          align-items: center;
           font-weight: 600;
           font-size: 0.75rem;
           text-transform: uppercase;
+          letter-spacing: 0.04em;
         }
 
-        .status-ok {
-          background: rgba(16, 185, 129, 0.15);
-          color: var(--accent-success);
+        .status-indicator::before {
+          content: '';
+          display: inline-block;
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          margin-right: 0.5rem;
+        }
+
+        .status-allow {
+          color: #268061;
+        }
+        .status-allow::before {
+          background-color: var(--spectrum-accent-green);
         }
 
         .status-warn {
-          background: rgba(245, 158, 11, 0.15);
-          color: var(--accent-warning);
+          color: #b86b00;
+        }
+        .status-warn::before {
+          background-color: var(--spectrum-accent-orange);
         }
 
-        .status-error {
-          background: rgba(239, 68, 68, 0.15);
-          color: var(--accent-error);
+        .status-block {
+          color: #c93b42;
+        }
+        .status-block::before {
+          background-color: var(--spectrum-accent-red);
         }
 
+        /* Spectrum Buttons */
+        .btn-spectrum {
+          background-color: var(--spectrum-accent-blue);
+          color: #ffffff;
+          border: 1px solid transparent;
+          padding: 0.5rem 1rem;
+          border-radius: 16px; /* Spectrum pill style */
+          font-weight: 600;
+          font-size: 0.85rem;
+          font-family: inherit;
+          cursor: pointer;
+          transition: background-color 0.15s ease;
+        }
+
+        .btn-spectrum:hover {
+          background-color: var(--spectrum-accent-blue-hover);
+        }
+
+        .btn-spectrum.secondary {
+          background-color: transparent;
+          border-color: var(--text-secondary);
+          color: var(--text-primary);
+        }
+
+        .btn-spectrum.secondary:hover {
+          background-color: rgba(255, 255, 255, 0.04);
+        }
+
+        .spectrum-link {
+          background: transparent;
+          border: none;
+          color: var(--spectrum-accent-blue);
+          cursor: pointer;
+          font-weight: 600;
+          font-size: 0.85rem;
+          margin-right: 0.75rem;
+          font-family: inherit;
+        }
+
+        .spectrum-link:hover {
+          color: var(--spectrum-accent-blue-hover);
+          text-decoration: underline;
+        }
+
+        .spectrum-link.delete {
+          color: var(--spectrum-accent-red);
+        }
+
+        .detail-link {
+          background: transparent;
+          border: none;
+          color: var(--spectrum-accent-blue);
+          cursor: pointer;
+          font-family: inherit;
+          font-weight: 600;
+          text-decoration: none;
+          outline: none;
+        }
+
+        .detail-link:hover {
+          text-decoration: underline;
+        }
+
+        /* Alerts feed panel */
         .activity-feed {
           display: flex;
           flex-direction: column;
@@ -361,7 +512,7 @@ export function renderDashboard(): string {
         }
 
         .activity-card {
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--spectrum-border);
           padding-bottom: 0.75rem;
         }
 
@@ -372,78 +523,59 @@ export function renderDashboard(): string {
         .activity-header {
           display: flex;
           justify-content: space-between;
-          margin-bottom: 0.5rem;
+          margin-bottom: 0.4rem;
         }
 
         .activity-time {
           font-size: 0.75rem;
-          color: var(--text-muted);
+          color: var(--text-secondary);
         }
 
-        .action-badge {
+        .badge-block {
+          background-color: rgba(215, 55, 63, 0.15);
+          color: #ff6b73;
           font-size: 0.6875rem;
           font-weight: 700;
           padding: 0.15rem 0.35rem;
           border-radius: 4px;
         }
 
-        .action-block {
-          background: rgba(239, 68, 68, 0.2);
-          color: var(--accent-error);
-        }
-
-        .action-warn {
-          background: rgba(245, 158, 11, 0.2);
-          color: var(--accent-warning);
+        .badge-warn {
+          background-color: rgba(223, 123, 0, 0.15);
+          color: #ffaa3b;
+          font-size: 0.6875rem;
+          font-weight: 700;
+          padding: 0.15rem 0.35rem;
+          border-radius: 4px;
         }
 
         .activity-body {
-          font-size: 0.875rem;
+          font-size: 0.85rem;
         }
 
         .matched-val {
-          color: var(--text-muted);
+          color: var(--text-secondary);
           margin-top: 0.25rem;
-          font-size: 0.8125rem;
+          font-size: 0.8rem;
+          font-family: monospace;
+          word-break: break-all;
         }
 
-        /* Buttons */
-        .btn-primary {
-          background: var(--accent-primary);
-          color: white;
-          border: none;
-          padding: 0.5rem 1rem;
-          border-radius: 6px;
+        .count-badge {
+          background-color: rgba(20, 115, 230, 0.1);
+          color: var(--spectrum-accent-blue);
+          padding: 0.2rem 0.5rem;
+          border-radius: 4px;
           font-weight: 600;
-          cursor: pointer;
-          font-size: 0.875rem;
-          transition: background 0.2s;
+          font-size: 0.8rem;
         }
 
-        .btn-primary:hover {
-          background: #4f46e5;
+        .time-text {
+          color: var(--text-secondary);
+          font-size: 0.8rem;
         }
 
-        .btn-action {
-          border: none;
-          background: transparent;
-          color: var(--accent-primary);
-          cursor: pointer;
-          font-weight: 500;
-          font-size: 0.875rem;
-          margin-right: 0.75rem;
-          text-decoration: underline;
-        }
-
-        .btn-action.delete {
-          color: var(--accent-error);
-        }
-
-        .btn-action:hover {
-          opacity: 0.8;
-        }
-
-        /* Tab panes */
+        /* Tab Panes */
         .tab-pane {
           display: none;
         }
@@ -452,7 +584,7 @@ export function renderDashboard(): string {
           display: block;
         }
 
-        /* Modal styling */
+        /* Spectrum Dialog Modal */
         .modal {
           display: none;
           position: fixed;
@@ -461,8 +593,7 @@ export function renderDashboard(): string {
           top: 0;
           width: 100%;
           height: 100%;
-          background-color: rgba(15, 23, 42, 0.8);
-          backdrop-filter: blur(4px);
+          background-color: rgba(0, 0, 0, 0.6);
           align-items: center;
           justify-content: center;
         }
@@ -472,29 +603,29 @@ export function renderDashboard(): string {
         }
 
         .modal-content {
-          background: #1e293b;
-          border: 1px solid var(--border);
-          border-radius: 16px;
+          background-color: var(--spectrum-panel);
+          border: 1px solid var(--spectrum-border);
+          border-radius: 4px;
           padding: 2rem;
           width: 90%;
           max-width: 500px;
-          box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
         }
 
         .modal-header {
-          font-family: 'Outfit', sans-serif;
-          font-size: 1.5rem;
-          font-weight: 600;
+          font-size: 1.15rem;
+          font-weight: 700;
           margin-bottom: 1.5rem;
           display: flex;
           justify-content: space-between;
           align-items: center;
+          color: #ffffff;
         }
 
         .modal-close {
           background: transparent;
           border: none;
-          color: var(--text-muted);
+          color: var(--text-secondary);
           font-size: 1.5rem;
           cursor: pointer;
         }
@@ -508,50 +639,45 @@ export function renderDashboard(): string {
         .form-field {
           display: flex;
           flex-direction: column;
-          gap: 0.5rem;
+          gap: 0.35rem;
         }
 
         .form-field label {
-          font-size: 0.875rem;
-          font-weight: 500;
-          color: var(--text-muted);
+          font-size: 0.72rem;
+          font-weight: 700;
+          color: var(--text-secondary);
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
         }
 
-        .form-field input, .form-field select, .form-field textarea {
-          background: rgba(15, 23, 42, 0.6);
-          border: 1px solid var(--border);
-          color: var(--text-main);
-          padding: 0.6rem 0.8rem;
-          border-radius: 8px;
-          font-size: 0.9375rem;
+        .spectrum-select, .spectrum-textarea {
+          background-color: var(--spectrum-bg);
+          border: 1px solid var(--spectrum-border);
+          color: var(--text-primary);
+          padding: 0.5rem 0.75rem;
+          border-radius: 4px;
+          font-family: inherit;
+          font-size: 0.9rem;
           outline: none;
         }
 
-        .form-field input:focus, .form-field select:focus, .form-field textarea:focus {
-          border-color: var(--accent-primary);
+        .spectrum-select:focus, .spectrum-textarea:focus {
+          border-color: var(--spectrum-accent-blue);
         }
 
-        /* Detail link & Drawer */
-        .detail-link {
-          color: var(--accent-primary);
-          text-decoration: none;
-        }
-        .detail-link:hover {
-          text-decoration: underline;
-        }
-
+        /* Slide-Out Detail Drawer */
         .drawer {
           position: fixed;
           top: 0;
-          right: -450px;
-          width: 450px;
+          right: -480px;
+          width: 480px;
           height: 100%;
-          background: #1e293b;
-          border-left: 1px solid var(--border);
-          box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
+          background-color: var(--spectrum-panel);
+          border-left: 1px solid var(--spectrum-border);
+          box-shadow: -10px 0 30px rgba(0, 0, 0, 0.4);
           z-index: 110;
-          transition: right 0.3s ease;
-          padding: 2rem;
+          transition: right 0.25s cubic-bezier(0.075, 0.82, 0.165, 1);
+          padding: 2.25rem;
           overflow-y: auto;
           display: flex;
           flex-direction: column;
@@ -565,77 +691,72 @@ export function renderDashboard(): string {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          border-bottom: 1px solid var(--border);
+          border-bottom: 1px solid var(--spectrum-border);
           padding-bottom: 1rem;
           margin-bottom: 1.5rem;
         }
 
         .drawer-title {
-          font-family: 'Outfit', sans-serif;
-          font-size: 1.25rem;
-          font-weight: 600;
+          font-size: 1.15rem;
+          font-weight: 700;
+          color: #ffffff;
         }
 
         .drawer-section {
-          margin-bottom: 1.5rem;
+          margin-bottom: 1.75rem;
         }
 
         .drawer-section h4 {
-          font-size: 0.875rem;
-          color: var(--text-muted);
+          font-size: 0.72rem;
+          color: var(--text-secondary);
           text-transform: uppercase;
-          letter-spacing: 0.05rem;
-          margin-bottom: 0.5rem;
+          letter-spacing: 0.06em;
+          margin-bottom: 0.75rem;
+          font-weight: 700;
         }
 
         .drawer-meta-grid {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 1rem;
-          background: rgba(15, 23, 42, 0.4);
-          padding: 1rem;
-          border-radius: 8px;
-          border: 1px solid var(--border);
+          gap: 1.25rem;
+          background-color: var(--spectrum-bg);
+          padding: 1.25rem;
+          border-radius: 4px;
+          border: 1px solid var(--spectrum-border);
         }
 
         .drawer-meta-item label {
-          font-size: 0.75rem;
-          color: var(--text-muted);
+          font-size: 0.7rem;
+          color: var(--text-secondary);
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          font-weight: 600;
         }
 
         .drawer-meta-item p {
-          font-size: 0.9375rem;
+          font-size: 0.9rem;
           font-weight: 500;
           margin-top: 0.25rem;
+          color: #ffffff;
         }
 
-        .count-badge {
-          background: rgba(99, 102, 241, 0.15);
-          color: var(--accent-primary);
-          padding: 0.2rem 0.5rem;
-          border-radius: 6px;
-          font-weight: 600;
-          font-size: 0.8125rem;
-        }
-
-        .time-text {
-          color: var(--text-muted);
-          font-size: 0.8125rem;
+        .drawer-meta-item.span-2 {
+          grid-column: span 2;
         }
       </style>
     </head>
     <body>
       <header>
         <div class="logo">ccr private gateway</div>
-        <nav class="nav-links">
-          <a onclick="switchTab('dashboard')" id="tab-link-dashboard" class="active">Dashboard</a>
-          <a onclick="switchTab('policies')" id="tab-link-policies">Policies Manager</a>
-          <a href="/admin/reports/approval">CISO Report</a>
+        <nav class="nav-tabs">
+          <button onclick="switchTab('dashboard')" id="tab-link-dashboard" class="tab-btn active">Dashboard</button>
+          <button onclick="switchTab('policies')" id="tab-link-policies" class="tab-btn">Policies</button>
+          <a href="/admin/reports/approval" class="ciso-link">CISO Report</a>
         </nav>
       </header>
 
       <main>
-        <!-- METRICS OVERVIEW CARD -->
+        <!-- METRICS TILES -->
         <div class="grid-metrics">
           <div class="metric-card">
             <div class="metric-title">Total Requests</div>
@@ -655,17 +776,17 @@ export function renderDashboard(): string {
           </div>
         </div>
 
-        <!-- TAB 1: MAIN TRAFFIC DASHBOARD -->
+        <!-- TAB 1: MAIN TRAFFIC PANEL -->
         <div id="pane-dashboard" class="tab-pane active">
           <div class="grid-content">
-            <div class="section-card">
-              <div class="section-title">Governed Traffic Explorer</div>
+            <div class="panel-card">
+              <div class="panel-title">Governed Traffic Explorer</div>
               
               <!-- Logs filters -->
               <div class="filter-bar">
                 <div class="filter-group">
                   <label for="filter-action">Rule Action</label>
-                  <select id="filter-action" class="filter-input" onchange="applyFilters()">
+                  <select id="filter-action" class="spectrum-select" onchange="applyFilters()">
                     <option value="all">All Actions</option>
                     <option value="blocked">Blocked</option>
                     <option value="warned">Warned</option>
@@ -675,7 +796,7 @@ export function renderDashboard(): string {
                 
                 <div class="filter-group">
                   <label for="filter-model">Model Search</label>
-                  <select id="filter-model" class="filter-input" onchange="applyFilters()">
+                  <select id="filter-model" class="spectrum-select" onchange="applyFilters()">
                     <option value="all">All Models</option>
                     <option value="sonnet">Sonnet</option>
                     <option value="claude">Claude (General)</option>
@@ -684,16 +805,16 @@ export function renderDashboard(): string {
 
                 <div class="filter-group">
                   <label for="filter-search">ID Search</label>
-                  <input type="text" id="filter-search" class="filter-input" placeholder="Search ID..." oninput="applyFilters()">
+                  <input type="text" id="filter-search" class="spectrum-input" placeholder="Search ID..." oninput="applyFilters()">
                 </div>
 
                 <div class="filter-group">
                   <label for="filter-start-date">Start Date</label>
-                  <input type="date" id="filter-start-date" class="filter-input" onchange="applyFilters()">
+                  <input type="date" id="filter-start-date" class="spectrum-input" onchange="applyFilters()">
                 </div>
                 
                 <div class="filter-group" style="margin-left: auto;">
-                  <button class="btn-primary" onclick="resetFilters()">Reset</button>
+                  <button class="btn-spectrum secondary" onclick="resetFilters()">Reset</button>
                 </div>
               </div>
 
@@ -709,16 +830,16 @@ export function renderDashboard(): string {
                   </tr>
                 </thead>
                 <tbody id="logs-table-body">
-                  ${requestRows || '<tr><td colspan="5" style="text-align:center;">No traffic recorded yet.</td></tr>'}
+                  ${requestRows || '<tr><td colspan="5" style="text-align:center; color:var(--text-secondary);">No traffic logs recorded yet.</td></tr>'}
                 </tbody>
               </table>
             </div>
 
             <!-- Activity alert panel -->
-            <div class="section-card">
-              <div class="section-title">Recent Policy Alerts</div>
+            <div class="panel-card">
+              <div class="panel-title">Recent Policy Alerts</div>
               <div class="activity-feed">
-                ${policyRows || '<p style="color:var(--text-muted); text-align:center;">No policy hits recorded yet.</p>'}
+                ${policyRows || '<p style="color:var(--text-secondary); text-align:center; font-size:0.875rem;">No policy hits recorded yet.</p>'}
               </div>
             </div>
           </div>
@@ -726,10 +847,10 @@ export function renderDashboard(): string {
 
         <!-- TAB 2: POLICY RULES CRUD PANELS -->
         <div id="pane-policies" class="tab-pane">
-          <div class="section-card">
-            <div class="section-title">
+          <div class="panel-card">
+            <div class="panel-title">
               Active Security Rules
-              <button class="btn-primary" onclick="openCreateRuleModal()">+ Create Policy Rule</button>
+              <button class="btn-spectrum" onclick="openCreateRuleModal()">+ Create Policy Rule</button>
             </div>
             <table>
               <thead>
@@ -745,7 +866,7 @@ export function renderDashboard(): string {
                 </tr>
               </thead>
               <tbody>
-                ${rulesRows || '<tr><td colspan="8" style="text-align:center; color:var(--text-muted);">No policy rules loaded.</td></tr>'}
+                ${rulesRows || '<tr><td colspan="8" style="text-align:center; color:var(--text-secondary);">No policy rules loaded.</td></tr>'}
               </tbody>
             </table>
           </div>
@@ -764,22 +885,22 @@ export function renderDashboard(): string {
             <div class="form-grid">
               <div class="form-field">
                 <label for="form-rule-name">Rule Name</label>
-                <input type="text" id="form-rule-name" required placeholder="e.g. Block Private SSH Keys">
+                <input type="text" id="form-rule-name" class="spectrum-input" required placeholder="e.g. Block Private SSH Keys">
               </div>
               <div class="form-field">
                 <label for="form-rule-type">Matcher Type</label>
-                <select id="form-rule-type" required>
+                <select id="form-rule-type" class="spectrum-select" required>
                   <option value="file_path">File Path Glob Pattern</option>
                   <option value="regex_pattern">Prompt Text Regex Scanner</option>
                 </select>
               </div>
               <div class="form-field">
                 <label for="form-rule-pattern">Pattern (Regex string)</label>
-                <input type="text" id="form-rule-pattern" required placeholder="e.g. \\.pem$ or id_rsa">
+                <input type="text" id="form-rule-pattern" class="spectrum-input" required placeholder="e.g. \\.pem$ or id_rsa">
               </div>
               <div class="form-field">
                 <label for="form-rule-mode">Enforcement Action</label>
-                <select id="form-rule-mode" required>
+                <select id="form-rule-mode" class="spectrum-select" required>
                   <option value="enforce">Enforce (Immediately Block Request)</option>
                   <option value="warn">Warn (Log Hit & Flag Developer)</option>
                   <option value="monitor">Monitor (Silent Telemetry Log)</option>
@@ -787,16 +908,16 @@ export function renderDashboard(): string {
               </div>
               <div class="form-field">
                 <label for="form-rule-scope">Scope</label>
-                <input type="text" id="form-rule-scope" placeholder="e.g. repo, path class, config">
+                <input type="text" id="form-rule-scope" class="spectrum-input" placeholder="e.g. repo, path class, config">
               </div>
               <div class="form-field">
                 <label for="form-rule-desc">Rule Description</label>
-                <textarea id="form-rule-desc" rows="3" placeholder="Explain the security rationale of this rule..."></textarea>
+                <textarea id="form-rule-desc" class="spectrum-textarea" rows="3" placeholder="Explain the security rationale of this rule..."></textarea>
               </div>
             </div>
             <div style="display:flex; justify-content: flex-end; gap: 1rem;">
-              <button type="button" class="btn-action" onclick="closePolicyModal()">Cancel</button>
-              <button type="submit" class="btn-primary">Save Ruleset</button>
+              <button type="button" class="btn-spectrum secondary" onclick="closePolicyModal()">Cancel</button>
+              <button type="submit" class="btn-spectrum">Save Ruleset</button>
             </div>
           </form>
         </div>
@@ -858,15 +979,15 @@ export function renderDashboard(): string {
               <label>Baseline Price (Est.)</label>
               <p id="det-baseline-cost">$0.0000</p>
             </div>
-            <div class="drawer-meta-item" style="grid-column: span 2; border-top: 1px solid var(--border); padding-top: 0.5rem; margin-top: 0.5rem;">
-              <label style="color: var(--accent-success); font-weight:600;">Interception Cost Savings (Delta)</label>
-              <p id="det-delta-cost" style="color: var(--accent-success); font-weight:700; font-size: 1.125rem;">$0.0000</p>
+            <div class="drawer-meta-item span-2" style="border-top: 1px solid var(--spectrum-border); padding-top: 0.75rem; margin-top: 0.5rem;">
+              <label style="color: var(--spectrum-accent-green); font-weight:600;">Interception Cost Savings (Delta)</label>
+              <p id="det-delta-cost" style="color: var(--spectrum-accent-green); font-weight:700; font-size: 1.1rem;">$0.0000</p>
             </div>
           </div>
         </div>
 
         <div class="drawer-section" id="drawer-sec-hits" style="display:none;">
-          <h4 style="color:var(--accent-error);">Policy Violations Triggered</h4>
+          <h4 style="color:var(--spectrum-accent-red);">Policy Violations Triggered</h4>
           <div id="drawer-hit-list" style="display:flex; flex-direction:column; gap:0.5rem; margin-top:0.5rem;">
             <!-- policy hit cards -->
           </div>
@@ -876,14 +997,15 @@ export function renderDashboard(): string {
       <!-- INLINED COMPLIANCE SCRIPTS FOR CLIENT CONTROLS -->
       <script>
         // Seed database state objects locally on render for client-side search/filters
-        const REQUEST_EVENTS = ${JSON.stringify(db.request_events)};
-        const POLICY_HITS = ${JSON.stringify(db.policy_hits)};
-        const SPEND_RECORDS = ${JSON.stringify(db.spend_records)};
+        // ESCAPING SCRIPT TAGS IN SERIALIZED JSON PAYLOADS TO PREVENT SCRIPT BREAK XSS (Issue 2)
+        const REQUEST_EVENTS = ${JSON.stringify(db.request_events).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')};
+        const POLICY_HITS = ${JSON.stringify(db.policy_hits).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')};
+        const SPEND_RECORDS = ${JSON.stringify(db.spend_records).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')};
 
         // Tab selection logic
         function switchTab(tabId) {
           document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-          document.querySelectorAll('.nav-links a').forEach(a => a.classList.remove('active'));
+          document.querySelectorAll('.nav-tabs button').forEach(a => a.classList.remove('active'));
           
           document.getElementById('pane-' + tabId).classList.add('active');
           document.getElementById('tab-link-' + tabId).classList.add('active');
@@ -959,7 +1081,7 @@ export function renderDashboard(): string {
           document.getElementById('det-baseline-cost').innerText = '$' + Number(spend.baseline_cost).toFixed(6);
           document.getElementById('det-delta-cost').innerText = '$' + Number(spend.delta).toFixed(6);
 
-          // Populate Hits
+          // Populate Hits (Sanitized HTML inserts)
           const hitListDiv = document.getElementById('drawer-hit-list');
           const hitSection = document.getElementById('drawer-sec-hits');
           hitListDiv.innerHTML = '';
@@ -968,18 +1090,21 @@ export function renderDashboard(): string {
             hitSection.style.display = 'block';
             hits.forEach(h => {
               const div = document.createElement('div');
-              div.style.background = 'rgba(239, 68, 68, 0.1)';
-              div.style.border = '1px solid rgba(239, 68, 68, 0.2)';
+              div.style.background = 'rgba(215, 55, 63, 0.1)';
+              div.style.border = '1px solid rgba(215, 55, 63, 0.15)';
               div.style.padding = '0.75rem';
-              div.style.borderRadius = '6px';
-              div.style.fontSize = '0.875rem';
-              div.innerHTML = '<div style="font-weight:600; color:var(--accent-error); text-transform:uppercase; font-size:0.75rem; margin-bottom:0.25rem;">' +
-                h.action.toUpperCase() + ' TRIGGERED' +
+              div.style.borderRadius = '4px';
+              div.style.fontSize = '0.85rem';
+              
+              // Direct string construction to avoid nested script interpolation bugs
+              div.innerHTML = '<div style="font-weight:700; color:var(--spectrum-accent-red); text-transform:uppercase; font-size:0.72rem; margin-bottom:0.25rem; letter-spacing:0.04em;">' +
+                (h.action || '').toUpperCase() + ' TRIGGERED' +
               '</div>' +
-              '<p><strong>Rule ID:</strong> <code>' + h.rule_id + '</code></p>' +
-              '<p style="margin-top:0.25rem; font-family:monospace; font-size:0.75rem; word-break:break-all; color:var(--text-muted);">' +
-                (h.matched_value || 'Sensitive regex prompt warning') +
+              '<p style="margin-bottom:0.25rem;"><strong>Rule ID:</strong> <code>' + escapeStringHtml(h.rule_id) + '</code></p>' +
+              '<p style="font-family:monospace; font-size:0.75rem; color:var(--text-secondary); word-break:break-all;">' +
+                escapeStringHtml(h.matched_value || 'Sensitive value match triggered') +
               '</p>';
+              
               hitListDiv.appendChild(div);
             });
           } else {
@@ -987,6 +1112,17 @@ export function renderDashboard(): string {
           }
 
           document.getElementById('detail-drawer').classList.add('active');
+        }
+
+        // Helper to escape text inside DOM creations
+        function escapeStringHtml(str) {
+          if (!str) return '';
+          return str
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
         }
 
         function closeDrawer() {
@@ -1031,14 +1167,12 @@ export function renderDashboard(): string {
           
           let response;
           if (id) {
-            // Edit PUT
             response = await fetch('/admin/api/policies/' + id, {
               method: 'PUT',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify(payload)
             });
           } else {
-            // Create POST
             response = await fetch('/admin/api/policies', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
@@ -1075,7 +1209,7 @@ export function renderDashboard(): string {
 }
 
 /**
- * Returns a print-ready CISO Rollout Approval report with custom dynamic content.
+ * Returns a print-ready CISO Rollout Approval report styled cleanly for printing.
  */
 export function renderCisoReport(): string {
   const db = getDbData();
@@ -1084,10 +1218,10 @@ export function renderCisoReport(): string {
   const ruleSummary = db.policy_hits.slice(-30).reverse().map(h => {
     return `
       <tr>
-        <td><code>${h.correlation_id.substring(0, 8)}</code></td>
+        <td><code>${escapeHtml(h.correlation_id.substring(0, 8))}</code></td>
         <td>${new Date(h.timestamp).toLocaleString()}</td>
-        <td><code>${h.rule_id}</code></td>
-        <td><strong>${h.action.toUpperCase()}</strong></td>
+        <td><code>${escapeHtml(h.rule_id)}</code></td>
+        <td><strong>${escapeHtml(h.action.toUpperCase())}</strong></td>
         <td><small>${escapeHtml(h.matched_value || 'Sensitive regex prompt warning')}</small></td>
       </tr>
     `;
@@ -1099,8 +1233,8 @@ export function renderCisoReport(): string {
         <td><code>${escapeHtml(r.id)}</code></td>
         <td><strong>${escapeHtml(r.name)}</strong></td>
         <td><code>${escapeHtml(r.pattern)}</code></td>
-        <td><code>${r.type}</code></td>
-        <td><strong>${r.mode.toUpperCase()}</strong></td>
+        <td><code>${escapeHtml(r.type)}</code></td>
+        <td><strong>${escapeHtml(r.mode.toUpperCase())}</strong></td>
       </tr>
     `;
   }).join('');
@@ -1166,7 +1300,7 @@ export function renderCisoReport(): string {
           color: #0f172a;
           margin-top: 2rem;
           margin-bottom: 1rem;
-          border-left: 4px solid #6366f1;
+          border-left: 4px solid #1473e6;
           padding-left: 0.75rem;
         }
 
@@ -1201,24 +1335,24 @@ export function renderCisoReport(): string {
         }
 
         .btn-print {
-          background: #6366f1;
+          background: #1473e6;
           color: white;
           border: none;
           padding: 0.75rem 1.5rem;
-          border-radius: 6px;
+          border-radius: 16px;
           font-weight: 600;
           cursor: pointer;
           font-size: 0.875rem;
-          box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.2);
+          box-shadow: 0 4px 6px -1px rgba(20, 115, 230, 0.2);
           transition: background 0.2s;
         }
 
         .btn-print:hover {
-          background: #4f46e5;
+          background: #0d66d0;
         }
 
         .nav-link {
-          color: #6366f1;
+          color: #1473e6;
           text-decoration: none;
           font-weight: 500;
           display: inline-block;
@@ -1250,11 +1384,11 @@ export function renderCisoReport(): string {
         </div>
         <div class="meta-item">
           <label>Total Exfiltrations Intercepted</label>
-          <p style="color: #ef4444; font-weight: 700;">${totalBlocked} Blocked</p>
+          <p style="color: #d7373f; font-weight: 700;">${totalBlocked} Blocked</p>
         </div>
         <div class="meta-item">
           <label>Approved Rollout Status</label>
-          <p style="color: #10b981; font-weight: 700;">PASSED</p>
+          <p style="color: #12805c; font-weight: 700;">PASSED</p>
         </div>
       </div>
 
@@ -1279,7 +1413,7 @@ export function renderCisoReport(): string {
         </tbody>
       </table>
 
-      <h2>3. telemetric Audit Evidence</h2>
+      <h2>3. Telemetric Audit Evidence</h2>
       <table>
         <thead>
           <tr>

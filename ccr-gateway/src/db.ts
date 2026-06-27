@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 
 const DB_FILE = path.join(process.cwd(), 'ccr_database.json');
 
@@ -51,18 +52,9 @@ interface DatabaseSchema {
 /**
  * Reads database contents from local JSON file.
  */
-function readDb(): DatabaseSchema {
-  if (!fs.existsSync(DB_FILE)) {
-    return {
-      request_events: [],
-      policy_hits: [],
-      spend_records: [],
-      repo_configs: [],
-      policy_rules: []
-    };
-  }
+export async function readDb(): Promise<DatabaseSchema> {
   try {
-    const raw = fs.readFileSync(DB_FILE, 'utf8');
+    const raw = await fs.promises.readFile(DB_FILE, 'utf8');
     const parsed = JSON.parse(raw);
     return {
       request_events: parsed.request_events || [],
@@ -71,24 +63,21 @@ function readDb(): DatabaseSchema {
       repo_configs: parsed.repo_configs || [],
       policy_rules: parsed.policy_rules || []
     };
-  } catch (e) {
+  } catch (e: any) {
+    if (e.code === 'ENOENT') {
+      return { request_events: [], policy_hits: [], spend_records: [], repo_configs: [], policy_rules: [] };
+    }
     console.error('Failed to read local database file, returning empty schema.');
-    return {
-      request_events: [],
-      policy_hits: [],
-      spend_records: [],
-      repo_configs: [],
-      policy_rules: []
-    };
+    return { request_events: [], policy_hits: [], spend_records: [], repo_configs: [], policy_rules: [] };
   }
 }
 
 /**
  * Writes database contents to local JSON file.
  */
-function writeDb(data: DatabaseSchema): void {
+async function writeDb(data: DatabaseSchema): Promise<void> {
   try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf8');
+    await fs.promises.writeFile(DB_FILE, JSON.stringify(data, null, 2), 'utf8');
   } catch (e: any) {
     console.error(`Failed to write local database file: ${e.message}`);
   }
@@ -99,21 +88,10 @@ function writeDb(data: DatabaseSchema): void {
  */
 export async function initDatabase(): Promise<void> {
   console.log(`Initializing JSON database at ${DB_FILE}...`);
-  if (!fs.existsSync(DB_FILE)) {
-    writeDb({
-      request_events: [],
-      policy_hits: [],
-      spend_records: [],
-      repo_configs: [],
-      policy_rules: DEFAULT_RULES.map(r => ({ ...r, hit_count: 0 }))
-    });
-  } else {
-    // Seed policy_rules if they are missing or empty
-    const db = readDb();
-    if (!db.policy_rules || db.policy_rules.length === 0) {
-      db.policy_rules = DEFAULT_RULES.map(r => ({ ...r, hit_count: 0 }));
-      writeDb(db);
-    }
+  const db = await readDb();
+  if (!db.policy_rules || db.policy_rules.length === 0) {
+    db.policy_rules = DEFAULT_RULES.map(r => ({ ...r, hit_count: 0 }));
+    await writeDb(db);
   }
   console.log('JSON database successfully initialized.');
 }
@@ -121,16 +99,15 @@ export async function initDatabase(): Promise<void> {
 /**
  * Retrieve all active policy rules.
  */
-export function getPolicies(): PolicyRule[] {
-  const db = readDb();
-  return db.policy_rules || [];
+export async function getPolicies(): Promise<PolicyRule[]> {
+  return (await readDb()).policy_rules || [];
 }
 
 /**
  * Add or update a policy rule.
  */
-export function savePolicy(rule: PolicyRule): void {
-  const db = readDb();
+export async function savePolicy(rule: PolicyRule): Promise<void> {
+  const db = await readDb();
   if (!db.policy_rules) {
     db.policy_rules = [];
   }
@@ -148,31 +125,31 @@ export function savePolicy(rule: PolicyRule): void {
       hit_count: 0
     });
   }
-  writeDb(db);
+  await writeDb(db);
 }
 
 /**
  * Delete a policy rule.
  */
-export function deletePolicy(id: string): void {
-  const db = readDb();
+export async function deletePolicy(id: string): Promise<void> {
+  const db = await readDb();
   if (db.policy_rules) {
     db.policy_rules = db.policy_rules.filter(r => r.id !== id);
   }
-  writeDb(db);
+  await writeDb(db);
 }
 
 /**
  * Increment matching hit counter for a policy rule.
  */
-export function incrementPolicyHits(id: string): void {
-  const db = readDb();
+export async function incrementPolicyHits(id: string): Promise<void> {
+  const db = await readDb();
   if (db.policy_rules) {
     const rule = db.policy_rules.find(r => r.id === id);
     if (rule) {
       rule.hit_count = (rule.hit_count || 0) + 1;
       rule.last_matched_at = new Date().toISOString();
-      writeDb(db);
+      await writeDb(db);
     }
   }
 }
@@ -187,9 +164,9 @@ export async function logRequestEvent(
   status: number,
   latencyMs: number
 ): Promise<void> {
-  const db = readDb();
+  const db = await readDb();
   const newEvent: RequestEvent = {
-    id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+    id: uuidv4(),
     correlation_id: correlationId,
     timestamp: new Date().toISOString(),
     model,
@@ -198,7 +175,10 @@ export async function logRequestEvent(
     latency_ms: latencyMs
   };
   db.request_events.push(newEvent);
-  writeDb(db);
+  if (db.request_events.length > 5000) {
+    db.request_events = db.request_events.slice(-5000);
+  }
+  await writeDb(db);
 }
 
 /**
@@ -210,9 +190,9 @@ export async function logPolicyHit(
   action: string,
   matchedValue?: string
 ): Promise<void> {
-  const db = readDb();
+  const db = await readDb();
   const newHit: PolicyHit = {
-    id: `hit-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+    id: uuidv4(),
     correlation_id: correlationId,
     rule_id: ruleId,
     action,
@@ -220,7 +200,10 @@ export async function logPolicyHit(
     timestamp: new Date().toISOString()
   };
   db.policy_hits.push(newHit);
-  writeDb(db);
+  if (db.policy_hits.length > 5000) {
+    db.policy_hits = db.policy_hits.slice(-5000);
+  }
+  await writeDb(db);
 }
 
 /**
@@ -234,9 +217,9 @@ export async function logSpendRecord(
   baselineCost: number,
   delta: number
 ): Promise<void> {
-  const db = readDb();
+  const db = await readDb();
   const newSpend: SpendRecord = {
-    id: `spd-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+    id: uuidv4(),
     correlation_id: correlationId,
     input_tokens: inputTokens,
     output_tokens: outputTokens,
@@ -246,5 +229,8 @@ export async function logSpendRecord(
     timestamp: new Date().toISOString()
   };
   db.spend_records.push(newSpend);
-  writeDb(db);
+  if (db.spend_records.length > 5000) {
+    db.spend_records = db.spend_records.slice(-5000);
+  }
+  await writeDb(db);
 }

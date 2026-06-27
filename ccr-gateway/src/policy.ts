@@ -10,6 +10,9 @@ export interface PolicyRule {
   type: 'file_path' | 'regex_pattern' | 'ccrignore';
   pattern: string; // regex pattern or file path glob
   description: string;
+  scope?: string;
+  hit_count?: number;
+  last_matched_at?: string;
 }
 
 export interface PolicyEvaluationResult {
@@ -22,7 +25,7 @@ export interface PolicyEvaluationResult {
 }
 
 // Default static rules for the prototype
-export const DEFAULT_RULES: PolicyRule[] = [
+export const DEFAULT_RULES: readonly PolicyRule[] = Object.freeze([
   {
     id: 'rule-env',
     name: 'Block Env Files',
@@ -47,10 +50,10 @@ export const DEFAULT_RULES: PolicyRule[] = [
     pattern: 'sk-ant-api03-[A-Za-z0-9_\\-]{80,}|AIzaSy[A-Za-z0-9_\\-]{33}',
     description: 'Scans for raw Anthropic API keys or Google Cloud API keys in prompts'
   }
-];
+]);
 
 export class PolicyEngine {
-  private rules: PolicyRule[];
+  private rules: readonly PolicyRule[];
 
   constructor() {
     this.rules = DEFAULT_RULES;
@@ -152,8 +155,16 @@ export class PolicyEngine {
         for (const block of msg.content) {
           if (block.type === 'text') {
             combinedText += block.text + '\n';
-          } else if (block.type === 'tool_result' && typeof block.content === 'string') {
-            combinedText += block.content + '\n';
+          } else if (block.type === 'tool_result') {
+            if (typeof block.content === 'string') {
+              combinedText += block.content + '\n';
+            } else if (Array.isArray(block.content)) {
+              for (const inner of block.content) {
+                if (inner.type === 'text' && typeof inner.text === 'string') {
+                  combinedText += inner.text + '\n';
+                }
+              }
+            }
           }
         }
       }
@@ -238,9 +249,15 @@ export class PolicyEngine {
             if (typeof filePath === 'string') {
               filePath = filePath.replace(/\\/g, '/');
               for (const pattern of patterns) {
-                if (filePath.includes(pattern) || new RegExp(pattern).test(filePath)) {
-                  return { allowed: false, matchedPath: filePath };
-                }
+                let regexMatch = false;
+              try {
+                regexMatch = new RegExp(pattern).test(filePath);
+              } catch (_e) {
+                // invalid regex pattern in .ccrignore — skip regex test, rely on includes()
+              }
+              if (filePath.includes(pattern) || regexMatch) {
+                return { allowed: false, matchedPath: filePath };
+              }
               }
             }
           }

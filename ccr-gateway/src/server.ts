@@ -34,8 +34,29 @@ const server = fastify({
 // Configure defaults
 const UPSTREAM_URL = process.env.UPSTREAM_URL || 'https://api.anthropic.com';
 const PORT = parseInt(process.env.PORT || '8081', 10);
+const REPO_PATH = process.env.REPO_PATH || process.cwd();
+
+const TOKEN_COSTS: Record<string, { input: number; output: number }> = {
+  'claude-haiku-4-5': { input: 0.0000008, output: 0.000004 },
+  'claude-sonnet-4-5': { input: 0.000003, output: 0.000015 },
+  'claude-sonnet-4-6': { input: 0.000003, output: 0.000015 },
+  'claude-opus-4-8': { input: 0.000015, output: 0.000075 },
+};
+const DEFAULT_TOKEN_COST = { input: 0.000003, output: 0.000015 };
 
 const policyEngine = new PolicyEngine();
+
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+
+server.addHook('preHandler', async (req, reply) => {
+  if (req.url.startsWith('/admin')) {
+    if (!ADMIN_TOKEN) return; // dev mode: no token configured = open
+    const token = req.headers['x-admin-token'];
+    if (token !== ADMIN_TOKEN) {
+      reply.status(401).send({ error: 'Unauthorized' });
+    }
+  }
+});
 
 // Health check endpoints
 server.get('/health', async () => {
@@ -68,6 +89,18 @@ server.post('/admin/api/policies', async (req, reply) => {
     reply.status(400).send({ error: 'Missing required fields (name, pattern, mode, type)' });
     return;
   }
+  const VALID_MODES = ['monitor', 'warn', 'enforce'];
+  const VALID_TYPES = ['file_path', 'regex_pattern', 'ccrignore'];
+  const VALID_SCOPES = ['repo', 'global'];
+
+  if (!VALID_MODES.includes(body.mode) || !VALID_TYPES.includes(body.type)) {
+    reply.status(400).send({ error: 'Invalid mode or type value' });
+    return;
+  }
+  if (body.scope && !VALID_SCOPES.includes(body.scope)) {
+    reply.status(400).send({ error: 'Invalid scope value' });
+    return;
+  }
   const newRule = {
     id: `rule-${Date.now()}`,
     name: body.name,
@@ -77,17 +110,29 @@ server.post('/admin/api/policies', async (req, reply) => {
     description: body.description || '',
     scope: body.scope || 'repo'
   };
-  savePolicy(newRule);
+  await savePolicy(newRule);
   return newRule;
 });
 
 server.put('/admin/api/policies/:id', async (req, reply) => {
   const { id } = req.params as any;
   const body = req.body as any;
-  const existingRules = getPolicies();
+  const existingRules = await getPolicies();
   const rule = existingRules.find(r => r.id === id);
   if (!rule) {
     reply.status(404).send({ error: 'Policy rule not found' });
+    return;
+  }
+  const VALID_MODES_PUT = ['monitor', 'warn', 'enforce'];
+  const VALID_TYPES_PUT = ['file_path', 'regex_pattern', 'ccrignore'];
+  const VALID_SCOPES_PUT = ['repo', 'global'];
+
+  if (!VALID_MODES_PUT.includes(body.mode) || !VALID_TYPES_PUT.includes(body.type)) {
+    reply.status(400).send({ error: 'Invalid mode or type value' });
+    return;
+  }
+  if (body.scope && !VALID_SCOPES_PUT.includes(body.scope)) {
+    reply.status(400).send({ error: 'Invalid scope value' });
     return;
   }
   const updatedRule = {
@@ -99,13 +144,13 @@ server.put('/admin/api/policies/:id', async (req, reply) => {
     description: body.description !== undefined ? body.description : rule.description,
     scope: body.scope !== undefined ? body.scope : rule.scope
   };
-  savePolicy(updatedRule);
+  await savePolicy(updatedRule);
   return updatedRule;
 });
 
 server.delete('/admin/api/policies/:id', async (req, reply) => {
   const { id } = req.params as any;
-  deletePolicy(id);
+  await deletePolicy(id);
   return { success: true };
 });
 
@@ -114,8 +159,8 @@ server.post('/v1/messages', async (req, reply) => {
   const correlationId = uuidv4();
   const startTime = process.hrtime();
 
-  // Diagnostic: Log all incoming headers
-  server.log.info({ correlationId, headers: req.headers }, 'Incoming request headers');
+  const { 'x-api-key': _key, authorization: _auth, ...safeHeaders } = req.headers;
+  server.log.info({ correlationId, headers: safeHeaders }, 'Incoming request headers');
 
   const apiKey = (req.headers['x-api-key'] || req.headers['authorization']) as string;
   const anthropicVersion = req.headers['anthropic-version'] as string;
@@ -134,12 +179,9 @@ server.post('/v1/messages', async (req, reply) => {
   const reqBody = req.body as any;
   const targetModel = reqBody?.model || 'unknown';
 
-  // Diagnostic: Log request body to inspect Claude Code tool schemas
-  server.log.info({ correlationId, body: reqBody }, 'Incoming request body');
-
   // 1. Evaluate request against active database policies
-  const activeRules = getPolicies();
-  const policyResult = policyEngine.evaluateRequest(reqBody, process.cwd(), activeRules);
+  const activeRules = await getPolicies();
+  const policyResult = policyEngine.evaluateRequest(reqBody, REPO_PATH, activeRules);
 
   if (!policyResult.allowed) {
     const endTime = process.hrtime(startTime);
@@ -156,7 +198,7 @@ server.post('/v1/messages', async (req, reply) => {
     // Database: Log policy hit records and increment matching hit count
     for (const ruleId of policyResult.triggeredRules) {
       await logPolicyHit(correlationId, ruleId, 'block', policyResult.blockedReason);
-      incrementPolicyHits(ruleId);
+      await incrementPolicyHits(ruleId);
     }
 
     // Database: Log exfiltration-prevention savings (audited baseline of $0.005 saved per blocked code leak)
@@ -180,7 +222,7 @@ server.post('/v1/messages', async (req, reply) => {
     );
     for (const ruleId of policyResult.triggeredRules) {
       await logPolicyHit(correlationId, ruleId, 'warn');
-      incrementPolicyHits(ruleId);
+      await incrementPolicyHits(ruleId);
     }
   }
 
@@ -259,8 +301,9 @@ server.post('/v1/messages', async (req, reply) => {
         if (outputMatch) outputTokens = parseInt(outputMatch[1], 10);
 
         if (inputTokens > 0 || outputTokens > 0) {
-          const inputCost = inputTokens * 0.000003;
-          const outputCost = outputTokens * 0.000015;
+          const costs = TOKEN_COSTS[targetModel] || DEFAULT_TOKEN_COST;
+          const inputCost = inputTokens * costs.input;
+          const outputCost = outputTokens * costs.output;
           const actualCost = inputCost + outputCost;
           // Actual and baseline are equal in Sonnet proxy mode
           await logSpendRecord(correlationId, inputTokens, outputTokens, actualCost, actualCost, 0);
@@ -304,8 +347,9 @@ server.post('/v1/messages', async (req, reply) => {
 
       // Database: Log token usage spend record
       if (upstreamResponse.statusCode === 200) {
-        const inputCost = tokenUsage.input_tokens * 0.000003;
-        const outputCost = tokenUsage.output_tokens * 0.000015;
+        const costs = TOKEN_COSTS[targetModel] || DEFAULT_TOKEN_COST;
+        const inputCost = tokenUsage.input_tokens * costs.input;
+        const outputCost = tokenUsage.output_tokens * costs.output;
         const actualCost = inputCost + outputCost;
         await logSpendRecord(correlationId, tokenUsage.input_tokens, tokenUsage.output_tokens, actualCost, actualCost, 0);
       }
@@ -323,12 +367,12 @@ server.post('/v1/messages', async (req, reply) => {
     );
 
     // Database: Log failed request
-    await logRequestEvent(correlationId, targetModel, 'anthropic', 500, latencyMs);
+    await logRequestEvent(correlationId, targetModel, 'anthropic', 502, latencyMs);
 
-    reply.status(500).send({
+    reply.status(502).send({
       error: {
         type: 'api_error',
-        message: `ccr Gateway Error: Upstream connection failed. Details: ${error.message}`,
+        message: 'ccr Gateway: Upstream connection failed.',
       },
     });
   }
