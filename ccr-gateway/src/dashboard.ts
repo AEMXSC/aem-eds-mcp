@@ -133,13 +133,15 @@ export function renderDashboard(): string {
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>ccr Private Gateway Admin Console</title>
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
       <style>
         :root {
           /* Adobe Spectrum Darkest Palette Tokens */
           --spectrum-bg: #1e1e1e;
           --spectrum-panel: #262626;
+          --spectrum-sidebar: #1b1b1b;
           --spectrum-border: #323232;
+          
           --spectrum-accent-blue: #1473e6;
           --spectrum-accent-blue-hover: #0d66d0;
           --spectrum-accent-red: #d7373f;
@@ -162,121 +164,190 @@ export function renderDashboard(): string {
           background-color: var(--spectrum-bg);
           color: var(--text-primary);
           min-height: 100vh;
-          padding: 2.5rem;
+          display: flex;
+          overflow: hidden;
           line-height: 1.5;
         }
 
-        header {
+        /* LEFT RAIL (Sidebar App Shell) */
+        aside {
+          width: 250px;
+          background-color: var(--spectrum-sidebar);
+          border-right: 1px solid var(--spectrum-border);
           display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 2rem;
-          border-bottom: 1px solid var(--spectrum-border);
-          padding-bottom: 1.25rem;
+          flex-direction: column;
+          padding: 1.5rem;
+          flex-shrink: 0;
         }
 
-        .logo {
-          font-family: 'Outfit', sans-serif;
-          font-size: 1.35rem;
+        .aside-header {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          margin-bottom: 2rem;
+        }
+
+        .aside-logo {
           font-weight: 700;
           letter-spacing: 0.05em;
           text-transform: uppercase;
           color: #ffffff;
+          font-size: 0.95rem;
         }
 
-        /* Adobe Spectrum Tabs */
-        .nav-tabs {
+        .badge-pilot {
+          background-color: rgba(18, 128, 92, 0.15);
+          color: var(--spectrum-accent-green);
+          font-size: 0.65rem;
+          font-weight: 700;
+          padding: 0.15rem 0.4rem;
+          border-radius: 4px;
+          text-transform: uppercase;
+        }
+
+        .nav-vertical {
           display: flex;
-          gap: 1.5rem;
+          flex-direction: column;
+          gap: 0.25rem;
+          flex-grow: 1;
         }
 
-        .tab-btn {
+        .nav-item {
           background: transparent;
           border: none;
           color: var(--text-secondary);
           font-family: inherit;
           font-size: 0.875rem;
           font-weight: 600;
-          padding: 0.5rem 0;
+          text-align: left;
+          padding: 0.65rem 0.75rem;
+          border-radius: 4px;
           cursor: pointer;
-          position: relative;
-          transition: color 0.15s ease;
+          transition: background-color 0.15s ease, color 0.15s ease;
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
           text-decoration: none;
         }
 
-        .tab-btn:hover {
+        .nav-item:hover {
+          background-color: rgba(255, 255, 255, 0.04);
           color: #ffffff;
         }
 
-        .tab-btn.active {
+        .nav-item.active {
+          background-color: rgba(20, 115, 230, 0.1);
           color: var(--spectrum-accent-blue);
         }
 
-        .tab-btn.active::after {
-          content: '';
-          position: absolute;
-          bottom: -21px;
-          left: 0;
-          width: 100%;
-          height: 2px;
-          background-color: var(--spectrum-accent-blue);
+        .aside-footer {
+          border-top: 1px solid var(--spectrum-border);
+          padding-top: 1rem;
+          font-size: 0.75rem;
+          color: var(--text-disabled);
         }
 
-        .ciso-link {
+        /* MAIN CONTENT CONTAINER */
+        .workspace {
+          flex-grow: 1;
+          display: flex;
+          flex-direction: column;
+          height: 100vh;
+          overflow: hidden;
+        }
+
+        .top-bar {
+          height: 56px;
+          border-bottom: 1px solid var(--spectrum-border);
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 0 2rem;
+          background-color: var(--spectrum-panel);
+        }
+
+        .breadcrumbs {
+          font-size: 0.8rem;
           color: var(--text-secondary);
-          text-decoration: none;
-          font-size: 0.875rem;
+          font-weight: 500;
+        }
+
+        .breadcrumbs span {
+          color: var(--text-primary);
           font-weight: 600;
-          padding: 0.5rem 0;
-          transition: color 0.15s ease;
         }
 
-        .ciso-link:hover {
-          color: #ffffff;
+        .system-status {
+          font-size: 0.8rem;
+          color: var(--spectrum-accent-green);
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          gap: 0.4rem;
         }
 
-        /* Metric Columns (Spectrum Layout) */
+        .system-status::before {
+          content: '';
+          display: inline-block;
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background-color: var(--spectrum-accent-green);
+        }
+
+        .scrollable-body {
+          flex-grow: 1;
+          overflow-y: auto;
+          padding: 2rem;
+        }
+
+        /* Metrics Strip layout */
         .grid-metrics {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
-          border: 1px solid var(--spectrum-border);
-          background-color: var(--spectrum-panel);
-          border-radius: 4px;
+          gap: 1.25rem;
           margin-bottom: 2rem;
         }
 
-        @media (max-width: 900px) {
+        @media (max-width: 1100px) {
           .grid-metrics {
             grid-template-columns: repeat(2, 1fr);
           }
         }
 
-        @media (max-width: 500px) {
+        @media (max-width: 600px) {
           .grid-metrics {
             grid-template-columns: 1fr;
           }
         }
 
         .metric-card {
-          padding: 1.5rem;
-          border-right: 1px solid var(--spectrum-border);
+          background-color: var(--spectrum-panel);
+          border: 1px solid var(--spectrum-border);
+          border-radius: 4px;
+          padding: 1.25rem;
+          border-left: 3px solid var(--spectrum-accent-blue);
         }
 
-        .metric-card:last-child {
-          border-right: none;
+        .metric-card.blocked {
+          border-left-color: var(--spectrum-accent-red);
+        }
+
+        .metric-card.savings {
+          border-left-color: var(--spectrum-accent-green);
         }
 
         .metric-title {
-          font-size: 0.75rem;
+          font-size: 0.72rem;
           color: var(--text-secondary);
           font-weight: 700;
           text-transform: uppercase;
           letter-spacing: 0.06em;
-          margin-bottom: 0.5rem;
+          margin-bottom: 0.35rem;
         }
 
         .metric-value {
-          font-size: 1.75rem;
+          font-size: 1.5rem;
           font-weight: 600;
           color: #ffffff;
         }
@@ -289,14 +360,14 @@ export function renderDashboard(): string {
           color: var(--spectrum-accent-red);
         }
 
-        /* Main panels */
+        /* Split content structure */
         .grid-content {
           display: grid;
           grid-template-columns: 2.3fr 1fr;
           gap: 2rem;
         }
 
-        @media (max-width: 950px) {
+        @media (max-width: 1000px) {
           .grid-content {
             grid-template-columns: 1fr;
           }
@@ -310,10 +381,9 @@ export function renderDashboard(): string {
         }
 
         .panel-title {
-          font-size: 1rem;
+          font-size: 0.95rem;
           font-weight: 700;
           margin-bottom: 1.25rem;
-          letter-spacing: -0.01em;
           color: #ffffff;
           display: flex;
           justify-content: space-between;
@@ -326,7 +396,7 @@ export function renderDashboard(): string {
           flex-wrap: wrap;
           gap: 1rem;
           margin-bottom: 1.25rem;
-          padding: 1rem;
+          padding: 0.75rem 1rem;
           border-radius: 4px;
           background-color: var(--spectrum-bg);
           border: 1px solid var(--spectrum-border);
@@ -336,11 +406,11 @@ export function renderDashboard(): string {
         .filter-group {
           display: flex;
           flex-direction: column;
-          gap: 0.35rem;
+          gap: 0.25rem;
         }
 
         .filter-group label {
-          font-size: 0.72rem;
+          font-size: 0.7rem;
           color: var(--text-secondary);
           font-weight: 700;
           text-transform: uppercase;
@@ -351,15 +421,30 @@ export function renderDashboard(): string {
           background-color: var(--spectrum-panel);
           border: 1px solid var(--spectrum-border);
           color: var(--text-primary);
-          padding: 0.45rem 0.75rem;
+          padding: 0.4rem 0.65rem;
           border-radius: 4px;
           font-family: inherit;
           font-size: 0.85rem;
           outline: none;
-          min-width: 140px;
+          min-width: 130px;
         }
 
         .spectrum-input:focus {
+          border-color: var(--spectrum-accent-blue);
+        }
+
+        .spectrum-select {
+          background-color: var(--spectrum-panel);
+          border: 1px solid var(--spectrum-border);
+          color: var(--text-primary);
+          padding: 0.4rem 0.65rem;
+          border-radius: 4px;
+          font-family: inherit;
+          font-size: 0.85rem;
+          outline: none;
+        }
+
+        .spectrum-select:focus {
           border-color: var(--spectrum-accent-blue);
         }
 
@@ -373,23 +458,23 @@ export function renderDashboard(): string {
         th {
           color: var(--text-secondary);
           font-weight: 700;
-          font-size: 0.75rem;
+          font-size: 0.72rem;
           text-transform: uppercase;
           letter-spacing: 0.06em;
-          padding: 0.75rem 1rem;
+          padding: 0.65rem 0.75rem;
           border-bottom: 2px solid var(--spectrum-border);
           background-color: var(--spectrum-panel);
         }
 
         td {
-          padding: 0.75rem 1rem;
+          padding: 0.65rem 0.75rem;
           border-bottom: 1px solid var(--spectrum-border);
           font-size: 0.875rem;
           vertical-align: middle;
         }
 
         tr.log-row:hover {
-          background-color: rgba(255, 255, 255, 0.02);
+          background-color: rgba(255, 255, 255, 0.015);
         }
 
         code {
@@ -414,10 +499,10 @@ export function renderDashboard(): string {
         .status-indicator::before {
           content: '';
           display: inline-block;
-          width: 7px;
-          height: 7px;
+          width: 6px;
+          height: 6px;
           border-radius: 50%;
-          margin-right: 0.5rem;
+          margin-right: 0.45rem;
         }
 
         .status-allow {
@@ -446,8 +531,8 @@ export function renderDashboard(): string {
           background-color: var(--spectrum-accent-blue);
           color: #ffffff;
           border: 1px solid transparent;
-          padding: 0.5rem 1rem;
-          border-radius: 16px; /* Spectrum pill style */
+          padding: 0.4rem 0.9rem;
+          border-radius: 16px;
           font-weight: 600;
           font-size: 0.85rem;
           font-family: inherit;
@@ -466,7 +551,7 @@ export function renderDashboard(): string {
         }
 
         .btn-spectrum.secondary:hover {
-          background-color: rgba(255, 255, 255, 0.04);
+          background-color: rgba(255, 255, 255, 0.03);
         }
 
         .spectrum-link {
@@ -650,7 +735,7 @@ export function renderDashboard(): string {
           letter-spacing: 0.05em;
         }
 
-        .spectrum-select, .spectrum-textarea {
+        .spectrum-textarea {
           background-color: var(--spectrum-bg);
           border: 1px solid var(--spectrum-border);
           color: var(--text-primary);
@@ -661,7 +746,7 @@ export function renderDashboard(): string {
           outline: none;
         }
 
-        .spectrum-select:focus, .spectrum-textarea:focus {
+        .spectrum-textarea:focus {
           border-color: var(--spectrum-accent-blue);
         }
 
@@ -675,7 +760,7 @@ export function renderDashboard(): string {
           background-color: var(--spectrum-panel);
           border-left: 1px solid var(--spectrum-border);
           box-shadow: -10px 0 30px rgba(0, 0, 0, 0.4);
-          z-index: 110;
+          z-index: 200;
           transition: right 0.25s cubic-bezier(0.075, 0.82, 0.165, 1);
           padding: 2.25rem;
           overflow-y: auto;
@@ -746,132 +831,160 @@ export function renderDashboard(): string {
       </style>
     </head>
     <body>
-      <header>
-        <div class="logo">ccr private gateway</div>
-        <nav class="nav-tabs">
-          <button onclick="switchTab('dashboard')" id="tab-link-dashboard" class="tab-btn active">Dashboard</button>
-          <button onclick="switchTab('policies')" id="tab-link-policies" class="tab-btn">Policies</button>
-          <a href="/admin/reports/approval" class="ciso-link">CISO Report</a>
+      
+      <!-- LEFT RAIL SIDEBAR -->
+      <aside>
+        <div class="aside-header">
+          <div class="aside-logo">ccr gateway</div>
+          <div class="badge-pilot">Pilot</div>
+        </div>
+        <nav class="nav-vertical">
+          <button onclick="switchTab('dashboard')" id="tab-link-dashboard" class="nav-item active">
+            <span>Dashboard</span>
+          </button>
+          <button onclick="switchTab('policies')" id="tab-link-policies" class="nav-item">
+            <span>Policy Rules</span>
+          </button>
+          <a href="/admin/reports/approval" class="nav-item">
+            <span>CISO Report</span>
+          </a>
         </nav>
-      </header>
+        <div class="aside-footer">
+          ccr Console v1.0.0
+        </div>
+      </aside>
 
-      <main>
-        <!-- METRICS TILES -->
-        <div class="grid-metrics">
-          <div class="metric-card">
-            <div class="metric-title">Total Requests</div>
-            <div class="metric-value" id="agg-requests">${totalRequests}</div>
+      <!-- WORKSPACE AREA -->
+      <div class="workspace">
+        <!-- TOP STATUS BAR -->
+        <div class="top-bar">
+          <div class="breadcrumbs">
+            Security Control Plane / <span id="current-breadcrumb">Dashboard</span>
           </div>
-          <div class="metric-card">
-            <div class="metric-title">Exfiltrations Blocked</div>
-            <div class="metric-value blocked" id="agg-blocked">${totalBlocked}</div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-title">Rule Warnings</div>
-            <div class="metric-value" id="agg-warnings">${warnings}</div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-title">Audited Cost Savings</div>
-            <div class="metric-value savings" id="agg-savings">$${totalSavings.toFixed(4)}</div>
+          <div class="system-status">
+            Gateway: ACTIVE
           </div>
         </div>
 
-        <!-- TAB 1: MAIN TRAFFIC PANEL -->
-        <div id="pane-dashboard" class="tab-pane active">
-          <div class="grid-content">
-            <div class="panel-card">
-              <div class="panel-title">Governed Traffic Explorer</div>
-              
-              <!-- Logs filters -->
-              <div class="filter-bar">
-                <div class="filter-group">
-                  <label for="filter-action">Rule Action</label>
-                  <select id="filter-action" class="spectrum-select" onchange="applyFilters()">
-                    <option value="all">All Actions</option>
-                    <option value="blocked">Blocked</option>
-                    <option value="warned">Warned</option>
-                    <option value="allowed">Allowed</option>
-                  </select>
-                </div>
+        <!-- SCROLLABLE BODY -->
+        <div class="scrollable-body">
+          <!-- METRICS TILES -->
+          <div class="grid-metrics">
+            <div class="metric-card">
+              <div class="metric-title">Total Requests</div>
+              <div class="metric-value" id="agg-requests">${totalRequests}</div>
+            </div>
+            <div class="metric-card blocked">
+              <div class="metric-title">Exfiltrations Blocked</div>
+              <div class="metric-value blocked" id="agg-blocked">${totalBlocked}</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-title">Rule Warnings</div>
+              <div class="metric-value" id="agg-warnings">${warnings}</div>
+            </div>
+            <div class="metric-card savings">
+              <div class="metric-title">Audited Cost Savings</div>
+              <div class="metric-value savings" id="agg-savings">$${totalSavings.toFixed(4)}</div>
+            </div>
+          </div>
+
+          <!-- TAB 1: MAIN TRAFFIC PANEL -->
+          <div id="pane-dashboard" class="tab-pane active">
+            <div class="grid-content">
+              <div class="panel-card">
+                <div class="panel-title">Governed Traffic Explorer</div>
                 
-                <div class="filter-group">
-                  <label for="filter-model">Model Search</label>
-                  <select id="filter-model" class="spectrum-select" onchange="applyFilters()">
-                    <option value="all">All Models</option>
-                    <option value="sonnet">Sonnet</option>
-                    <option value="claude">Claude (General)</option>
-                  </select>
+                <!-- Logs filters -->
+                <div class="filter-bar">
+                  <div class="filter-group">
+                    <label for="filter-action">Rule Action</label>
+                    <select id="filter-action" class="spectrum-select" onchange="applyFilters()">
+                      <option value="all">All Actions</option>
+                      <option value="blocked">Blocked</option>
+                      <option value="warned">Warned</option>
+                      <option value="allowed">Allowed</option>
+                    </select>
+                  </div>
+                  
+                  <div class="filter-group">
+                    <label for="filter-model">Model Search</label>
+                    <select id="filter-model" class="spectrum-select" onchange="applyFilters()">
+                      <option value="all">All Models</option>
+                      <option value="sonnet">Sonnet</option>
+                      <option value="claude">Claude (General)</option>
+                    </select>
+                  </div>
+
+                  <div class="filter-group">
+                    <label for="filter-search">ID Search</label>
+                    <input type="text" id="filter-search" class="spectrum-input" placeholder="Search ID..." oninput="applyFilters()">
+                  </div>
+
+                  <div class="filter-group">
+                    <label for="filter-start-date">Start Date</label>
+                    <input type="date" id="filter-start-date" class="spectrum-input" onchange="applyFilters()">
+                  </div>
+                  
+                  <div class="filter-group" style="margin-left: auto;">
+                    <button class="btn-spectrum secondary" onclick="resetFilters()">Reset</button>
+                  </div>
                 </div>
 
-                <div class="filter-group">
-                  <label for="filter-search">ID Search</label>
-                  <input type="text" id="filter-search" class="spectrum-input" placeholder="Search ID..." oninput="applyFilters()">
-                </div>
-
-                <div class="filter-group">
-                  <label for="filter-start-date">Start Date</label>
-                  <input type="date" id="filter-start-date" class="spectrum-input" onchange="applyFilters()">
-                </div>
-                
-                <div class="filter-group" style="margin-left: auto;">
-                  <button class="btn-spectrum secondary" onclick="resetFilters()">Reset</button>
-                </div>
+                <!-- Logs table -->
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Request ID</th>
+                      <th>Timestamp</th>
+                      <th>Model</th>
+                      <th>Status</th>
+                      <th>Latency</th>
+                    </tr>
+                  </thead>
+                  <tbody id="logs-table-body">
+                    ${requestRows || '<tr><td colspan="5" style="text-align:center; color:var(--text-secondary);">No traffic logs recorded yet.</td></tr>'}
+                  </tbody>
+                </table>
               </div>
 
-              <!-- Logs table -->
+              <!-- Activity alert panel -->
+              <div class="panel-card">
+                <div class="panel-title">Recent Policy Alerts</div>
+                <div class="activity-feed">
+                  ${policyRows || '<p style="color:var(--text-secondary); text-align:center; font-size:0.875rem;">No policy hits recorded yet.</p>'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 2: POLICY RULES CRUD PANELS -->
+          <div id="pane-policies" class="tab-pane">
+            <div class="panel-card">
+              <div class="panel-title">
+                Active Security Rules
+                <button class="btn-spectrum" onclick="openCreateRuleModal()">+ Create Policy Rule</button>
+              </div>
               <table>
                 <thead>
                   <tr>
-                    <th>Request ID</th>
-                    <th>Timestamp</th>
-                    <th>Model</th>
-                    <th>Status</th>
-                    <th>Latency</th>
+                    <th>Rule Name</th>
+                    <th>Pattern Matcher</th>
+                    <th>Mode</th>
+                    <th>Type</th>
+                    <th>Scope</th>
+                    <th>Hit Count</th>
+                    <th>Last Match Time</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
-                <tbody id="logs-table-body">
-                  ${requestRows || '<tr><td colspan="5" style="text-align:center; color:var(--text-secondary);">No traffic logs recorded yet.</td></tr>'}
+                <tbody>
+                  ${rulesRows || '<tr><td colspan="8" style="text-align:center; color:var(--text-secondary);">No policy rules loaded.</td></tr>'}
                 </tbody>
               </table>
             </div>
-
-            <!-- Activity alert panel -->
-            <div class="panel-card">
-              <div class="panel-title">Recent Policy Alerts</div>
-              <div class="activity-feed">
-                ${policyRows || '<p style="color:var(--text-secondary); text-align:center; font-size:0.875rem;">No policy hits recorded yet.</p>'}
-              </div>
-            </div>
           </div>
         </div>
-
-        <!-- TAB 2: POLICY RULES CRUD PANELS -->
-        <div id="pane-policies" class="tab-pane">
-          <div class="panel-card">
-            <div class="panel-title">
-              Active Security Rules
-              <button class="btn-spectrum" onclick="openCreateRuleModal()">+ Create Policy Rule</button>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Rule Name</th>
-                  <th>Pattern Matcher</th>
-                  <th>Mode</th>
-                  <th>Type</th>
-                  <th>Scope</th>
-                  <th>Hit Count</th>
-                  <th>Last Match Time</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${rulesRows || '<tr><td colspan="8" style="text-align:center; color:var(--text-secondary);">No policy rules loaded.</td></tr>'}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </main>
+      </div>
 
       <!-- DIALOG MODAL: Create/Edit Policy Rule -->
       <div id="policy-modal" class="modal">
@@ -997,7 +1110,6 @@ export function renderDashboard(): string {
       <!-- INLINED COMPLIANCE SCRIPTS FOR CLIENT CONTROLS -->
       <script>
         // Seed database state objects locally on render for client-side search/filters
-        // ESCAPING SCRIPT TAGS IN SERIALIZED JSON PAYLOADS TO PREVENT SCRIPT BREAK XSS (Issue 2)
         const REQUEST_EVENTS = ${JSON.stringify(db.request_events).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')};
         const POLICY_HITS = ${JSON.stringify(db.policy_hits).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')};
         const SPEND_RECORDS = ${JSON.stringify(db.spend_records).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')};
@@ -1005,10 +1117,18 @@ export function renderDashboard(): string {
         // Tab selection logic
         function switchTab(tabId) {
           document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-          document.querySelectorAll('.nav-tabs button').forEach(a => a.classList.remove('active'));
+          document.querySelectorAll('.nav-vertical button').forEach(a => a.classList.remove('active'));
           
           document.getElementById('pane-' + tabId).classList.add('active');
           document.getElementById('tab-link-' + tabId).classList.add('active');
+
+          // Dynamically update breadcrumbs for enterprise layout
+          const bcrumb = document.getElementById('current-breadcrumb');
+          if (tabId === 'dashboard') {
+            bcrumb.innerText = 'Dashboard';
+          } else if (tabId === 'policies') {
+            bcrumb.innerText = 'Policies Manager';
+          }
         }
 
         // Search and filter logic
@@ -1096,7 +1216,6 @@ export function renderDashboard(): string {
               div.style.borderRadius = '4px';
               div.style.fontSize = '0.85rem';
               
-              // Direct string construction to avoid nested script interpolation bugs
               div.innerHTML = '<div style="font-weight:700; color:var(--spectrum-accent-red); text-transform:uppercase; font-size:0.72rem; margin-bottom:0.25rem; letter-spacing:0.04em;">' +
                 (h.action || '').toUpperCase() + ' TRIGGERED' +
               '</div>' +
