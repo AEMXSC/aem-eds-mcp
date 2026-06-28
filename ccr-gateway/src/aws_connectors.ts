@@ -38,16 +38,19 @@ const AWS_BEARER_TOKEN_BEDROCK = process.env.AWS_BEARER_TOKEN_BEDROCK;
  */
 export async function invokeBedrockModel(
   modelId: string,
-  reqBody: any
+  reqBody: any,
+  explicitBedrockModelId?: string
 ): Promise<{ statusCode: number; body: string }> {
   // Native AWS Bedrock Runtime Client (PrivateLink).
   // Mantle routing is handled by the dedicated mantle/ branch in server.ts.
   const client = getBedrockClient();
 
-  // Map Anthropic route to Bedrock resource ID
-  const bedrockModelId = modelId.includes('claude-3-5-sonnet')
-    ? 'anthropic.claude-3-5-sonnet-20241022-v2:0'
-    : 'anthropic.claude-3-5-haiku-20241022-v1:0';
+  // Prefer explicit registry-provided model ID; fall back to legacy heuristic.
+  const bedrockModelId = explicitBedrockModelId || (
+    modelId.includes('claude-3-5-sonnet')
+      ? 'us.anthropic.claude-sonnet-4-6'
+      : 'us.anthropic.claude-haiku-4-5-20251001-v1:0'
+  );
 
   const bedrockPayload = {
     anthropic_version: 'bedrock-2023-05-31',

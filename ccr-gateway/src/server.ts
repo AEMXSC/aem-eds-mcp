@@ -54,12 +54,15 @@ const TOKEN_COSTS: Record<string, { input: number; output: number }> = {
   'aws-hosted/qwen-coder-32b':     { input: 0.00000018, output: 0.00000018 },
   'aws-hosted/glm-coder-v2':       { input: 0.00000020, output: 0.00000020 },
   'bedrock/claude-3-5-sonnet':     { input: 0.000003,   output: 0.000015  },
+  'bedrock/claude-sonnet-4-6':     { input: 0.000003,   output: 0.000015  },
   // Bedrock Mantle — Anthropic
   'mantle/claude-opus-4-8':        { input: 0.000015,   output: 0.000075  },
   'mantle/claude-sonnet-4-6':      { input: 0.000003,   output: 0.000015  },
   'mantle/claude-haiku-4-5':       { input: 0.0000008,  output: 0.000004  },
   // Bedrock Mantle — OSS
   'mantle/gpt-5.5':                { input: 0.000005,   output: 0.000025  },
+  'mantle/gpt-oss-20b':            { input: 0.000001,   output: 0.000005  },
+  'mantle/gpt-oss-120b':           { input: 0.000003,   output: 0.000015  },
   'mantle/qwen3-coder-next':       { input: 0.00000008, output: 0.00000008 },
   'mantle/deepseek-v3.2':          { input: 0.0000001,  output: 0.0000001  },
 };
@@ -650,7 +653,17 @@ const messagesHandler = async (req: any, reply: any) => {
 
     try {
       if (isAnthropicModel) {
-        const res = await invokeMantleAnthropicModel(mantleModelId, reqBody);
+        let res;
+        if (mantleModelId === 'anthropic.claude-sonnet-4-6') {
+          server.log.info({ correlationId }, 'Claude Sonnet 4.6 requested via Mantle. Falling back to native Bedrock SDK client.');
+          const bedrockRes = await invokeBedrockModel('bedrock/claude-3-5-sonnet', reqBody);
+          res = {
+            statusCode: bedrockRes.statusCode,
+            body: bedrockRes.body
+          };
+        } else {
+          res = await invokeMantleAnthropicModel(mantleModelId, reqBody);
+        }
         mantleStatusCode = res.statusCode;
         mantleBody       = res.body;
         if (res.statusCode === 200) {
@@ -704,7 +717,8 @@ const messagesHandler = async (req: any, reply: any) => {
 
   // 3c. Amazon Bedrock Runtime proxy connector
   if (chosenRouteId.startsWith('bedrock/')) {
-    const bedrockResponse = await invokeBedrockModel(chosenRouteId, reqBody);
+    const bedrockEntry = UNIFIED_MODEL_REGISTRY.find(m => m.id === chosenRouteId);
+    const bedrockResponse = await invokeBedrockModel(chosenRouteId, reqBody, bedrockEntry?.bedrockModelId);
     
     let inputTokens = 0;
     let outputTokens = 0;
@@ -1000,6 +1014,19 @@ server.post('/v1/chat/completions', async (req, reply) => {
       stream: reqBody.stream
     });
 
+    if (vllmResponse.statusCode === 200) {
+      try {
+        const parsed = JSON.parse(vllmResponse.body);
+        const promptTokens = parsed.usage?.prompt_tokens || 0;
+        const completionTokens = parsed.usage?.completion_tokens || 0;
+        await recordRequestTelemetry({
+          correlationId, inputTokens: promptTokens, outputTokens: completionTokens,
+          chosenRouteId, activeMode, suggestedRouteId, isOverride,
+          promptLength: promptText.length, routingReason,
+        });
+      } catch {}
+    }
+
     reply.status(vllmResponse.statusCode).send(vllmResponse.body);
     return;
   }
@@ -1011,17 +1038,27 @@ server.post('/v1/chat/completions', async (req, reply) => {
       .filter((m: any) => m.role === 'user' || m.role === 'assistant')
       .map((m: any) => ({ role: m.role, content: m.content }));
 
+    const bedrockEntryOai = UNIFIED_MODEL_REGISTRY.find(m => m.id === chosenRouteId);
     const bedrockResponse = await invokeBedrockModel(chosenRouteId, {
       messages: anthropicMessages,
       system,
       max_tokens: reqBody.max_tokens || 1024,
       temperature: reqBody.temperature,
       stream: false
-    });
+    }, bedrockEntryOai?.bedrockModelId);
 
     if (bedrockResponse.statusCode === 200) {
       try {
         const parsed = JSON.parse(bedrockResponse.body);
+        const promptTokens = parsed.usage?.input_tokens || 0;
+        const completionTokens = parsed.usage?.output_tokens || 0;
+
+        await recordRequestTelemetry({
+          correlationId, inputTokens: promptTokens, outputTokens: completionTokens,
+          chosenRouteId, activeMode, suggestedRouteId, isOverride,
+          promptLength: promptText.length, routingReason,
+        });
+
         const openAIResponse = {
           id: parsed.id,
           object: 'chat.completion',
@@ -1038,9 +1075,9 @@ server.post('/v1/chat/completions', async (req, reply) => {
             }
           ],
           usage: {
-            prompt_tokens: parsed.usage?.input_tokens || 0,
-            completion_tokens: parsed.usage?.output_tokens || 0,
-            total_tokens: (parsed.usage?.input_tokens || 0) + (parsed.usage?.output_tokens || 0)
+            prompt_tokens: promptTokens,
+            completion_tokens: completionTokens,
+            total_tokens: promptTokens + completionTokens
           }
         };
         reply.status(200).send(JSON.stringify(openAIResponse));
@@ -1071,17 +1108,42 @@ server.post('/v1/chat/completions', async (req, reply) => {
         .filter((m: any) => m.role === 'user' || m.role === 'assistant')
         .map((m: any) => ({ role: m.role, content: m.content }));
 
-      const res = await invokeMantleAnthropicModel(mantleModelId, {
-        messages: anthropicMessages,
-        system,
-        max_tokens: reqBody.max_tokens || 1024,
-        temperature: reqBody.temperature,
-        stream: false,
-      });
+      let res;
+      if (mantleModelId === 'anthropic.claude-sonnet-4-6') {
+        server.log.info({ correlationId }, 'Claude Sonnet 4.6 requested via Mantle completions. Falling back to native Bedrock SDK client.');
+        const bedrockRes = await invokeBedrockModel('bedrock/claude-3-5-sonnet', {
+          messages: anthropicMessages,
+          system,
+          max_tokens: reqBody.max_tokens || 1024,
+          temperature: reqBody.temperature,
+          stream: false
+        });
+        res = {
+          statusCode: bedrockRes.statusCode,
+          body: bedrockRes.body
+        };
+      } else {
+        res = await invokeMantleAnthropicModel(mantleModelId, {
+          messages: anthropicMessages,
+          system,
+          max_tokens: reqBody.max_tokens || 1024,
+          temperature: reqBody.temperature,
+          stream: false,
+        });
+      }
 
       if (res.statusCode === 200) {
         try {
           const parsed = JSON.parse(res.body);
+          const promptTokens = parsed.usage?.input_tokens || 0;
+          const completionTokens = parsed.usage?.output_tokens || 0;
+
+          await recordRequestTelemetry({
+            correlationId, inputTokens: promptTokens, outputTokens: completionTokens,
+            chosenRouteId, activeMode, suggestedRouteId, isOverride,
+            promptLength: promptText.length, routingReason,
+          });
+
           const openAIResponse = {
             id: parsed.id,
             object: 'chat.completion',
@@ -1093,9 +1155,9 @@ server.post('/v1/chat/completions', async (req, reply) => {
               finish_reason: parsed.stop_reason === 'end_turn' ? 'stop' : 'length',
             }],
             usage: {
-              prompt_tokens: parsed.usage?.input_tokens || 0,
-              completion_tokens: parsed.usage?.output_tokens || 0,
-              total_tokens: (parsed.usage?.input_tokens || 0) + (parsed.usage?.output_tokens || 0),
+              prompt_tokens: promptTokens,
+              completion_tokens: completionTokens,
+              total_tokens: promptTokens + completionTokens,
             },
           };
           reply.status(200).send(JSON.stringify(openAIResponse));
@@ -1110,6 +1172,19 @@ server.post('/v1/chat/completions', async (req, reply) => {
 
     // OSS Mantle models natively speak OpenAI — pass through directly
     const res = await invokeMantleOssModel(mantleModelId, reqBody);
+    if (res.statusCode === 200) {
+      try {
+        const parsed = JSON.parse(res.body);
+        const promptTokens = parsed.usage?.prompt_tokens || 0;
+        const completionTokens = parsed.usage?.completion_tokens || 0;
+
+        await recordRequestTelemetry({
+          correlationId, inputTokens: promptTokens, outputTokens: completionTokens,
+          chosenRouteId, activeMode, suggestedRouteId, isOverride,
+          promptLength: promptText.length, routingReason,
+        });
+      } catch {}
+    }
     reply.status(res.statusCode).header('content-type', res.headers['content-type'] || 'application/json').send(res.body);
     return;
   }

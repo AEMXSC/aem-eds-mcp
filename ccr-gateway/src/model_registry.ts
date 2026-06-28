@@ -11,6 +11,8 @@ export interface ModelRegistryEntry {
   health: 'healthy' | 'unhealthy';
   /** Bedrock Mantle model identifier — only set for hosting === 'mantle'. */
   mantleModelId?: string;
+  /** Native Bedrock model ARN/ID — only set for hosting === 'bedrock'. */
+  bedrockModelId?: string;
 }
 
 export const UNIFIED_MODEL_REGISTRY: ModelRegistryEntry[] = [
@@ -65,6 +67,20 @@ export const UNIFIED_MODEL_REGISTRY: ModelRegistryEntry[] = [
     availabilityStatus: 'online',
     aws_region: 'us-east-1',
     health: 'healthy',
+    bedrockModelId: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+  },
+  {
+    id: 'bedrock/claude-sonnet-4-6',
+    name: 'Claude Sonnet 4.6 (Bedrock)',
+    provider: 'anthropic',
+    hosting: 'bedrock',
+    cost: '$0.00300 / 1k tokens (PrivateLink)',
+    supportedModes: ['manual', 'suggested', 'auto'],
+    policyTags: ['frontier', 'high-reasoning'],
+    availabilityStatus: 'online',
+    aws_region: 'us-east-1',
+    health: 'healthy',
+    bedrockModelId: 'us.anthropic.claude-sonnet-4-6',
   },
 
   // ── Bedrock Mantle — Anthropic (Messages API /anthropic/v1/messages) ─────────
@@ -97,6 +113,20 @@ export const UNIFIED_MODEL_REGISTRY: ModelRegistryEntry[] = [
     mantleModelId: 'anthropic.claude-opus-4-7',
   },
   {
+    id: 'mantle/claude-sonnet-4-6',
+    name: 'Claude Sonnet 4.6 (Mantle)',
+    provider: 'anthropic',
+    hosting: 'mantle',
+    cost: '$0.00300 / 1k tokens',
+    supportedModes: ['manual', 'suggested', 'auto'],
+    policyTags: ['frontier', 'mantle'],
+    // Mantle's /v1/models does not list Claude Sonnet — use bedrock/claude-sonnet-4-6 instead.
+    availabilityStatus: 'offline',
+    aws_region: 'us-east-1',
+    health: 'unhealthy',
+    mantleModelId: 'anthropic.claude-sonnet-4-6',
+  },
+  {
     id: 'mantle/claude-haiku-4-5',
     name: 'Claude Haiku 4.5 (Mantle)',
     provider: 'anthropic',
@@ -104,9 +134,9 @@ export const UNIFIED_MODEL_REGISTRY: ModelRegistryEntry[] = [
     cost: '$0.00080 / 1k tokens',
     supportedModes: ['manual', 'suggested', 'auto'],
     policyTags: ['low-cost', 'mantle'],
-    availabilityStatus: 'offline',
+    availabilityStatus: 'online',
     aws_region: 'us-east-1',
-    health: 'unhealthy',
+    health: 'healthy',
     mantleModelId: 'anthropic.claude-haiku-4-5',
   },
 
@@ -188,6 +218,32 @@ export const UNIFIED_MODEL_REGISTRY: ModelRegistryEntry[] = [
     aws_region: 'us-east-1',
     health: 'unhealthy',
     mantleModelId: 'openai.gpt-5.5',
+  },
+  {
+    id: 'mantle/gpt-oss-20b',
+    name: 'GPT OSS 20B (Mini)',
+    provider: 'openai',
+    hosting: 'mantle',
+    cost: '$0.00100 / 1k tokens (Est.)',
+    supportedModes: ['manual', 'suggested', 'auto'],
+    policyTags: ['low-cost', 'high-reasoning', 'oss', 'mantle'],
+    availabilityStatus: 'online',
+    aws_region: 'us-east-1',
+    health: 'healthy',
+    mantleModelId: 'openai.gpt-oss-20b',
+  },
+  {
+    id: 'mantle/gpt-oss-120b',
+    name: 'GPT OSS 120B (Large)',
+    provider: 'openai',
+    hosting: 'mantle',
+    cost: '$0.00300 / 1k tokens (Est.)',
+    supportedModes: ['manual', 'suggested'],
+    policyTags: ['frontier', 'high-reasoning', 'oss', 'mantle'],
+    availabilityStatus: 'online',
+    aws_region: 'us-east-1',
+    health: 'healthy',
+    mantleModelId: 'openai.gpt-oss-120b',
   },
   {
     id: 'mantle/qwen3-coder-next',
