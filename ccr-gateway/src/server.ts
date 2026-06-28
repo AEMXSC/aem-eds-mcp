@@ -850,6 +850,19 @@ server.post('/v1/messages', async (req, reply) => {
   }
 });
 
+// ── Anthropic path alias — Claude Code uses /anthropic/v1/messages ───────────
+server.post('/anthropic/v1/messages', async (req, reply) => {
+  return server.inject({ method: 'POST', url: '/v1/messages', headers: req.headers as Record<string, string>, payload: JSON.stringify(req.body) }).then(res => {
+    reply.status(res.statusCode);
+    const ct = res.headers['content-type'];
+    if (ct) reply.header('content-type', ct as string);
+    Object.entries(res.headers).forEach(([k, v]) => {
+      if (k.startsWith('x-ccr') || k.startsWith('x-correlation')) reply.header(k, v as string);
+    });
+    reply.send(res.rawPayload);
+  });
+});
+
 // ── OpenAI Chat Completions Endpoint ──────────────────────────────────────────
 server.post('/v1/chat/completions', async (req, reply) => {
   const correlationId = uuidv4();
@@ -1041,6 +1054,67 @@ server.post('/v1/chat/completions', async (req, reply) => {
     } else {
       reply.status(bedrockResponse.statusCode).send(bedrockResponse.body);
     }
+    return;
+  }
+
+  if (chosenRouteId.startsWith('mantle/')) {
+    const registryEntry = UNIFIED_MODEL_REGISTRY.find(m => m.id === chosenRouteId);
+    const mantleModelId = registryEntry?.mantleModelId;
+
+    if (!mantleModelId) {
+      reply.status(500).send({ error: { message: `No mantleModelId mapped for route "${chosenRouteId}".` } });
+      return;
+    }
+
+    const isAnthropicModel = registryEntry?.provider === 'anthropic';
+
+    if (isAnthropicModel) {
+      // Anthropic Mantle models expect Anthropic format — translate OpenAI request first
+      const system = reqBody.messages.find((m: any) => m.role === 'system' || m.role === 'developer')?.content;
+      const anthropicMessages = reqBody.messages
+        .filter((m: any) => m.role === 'user' || m.role === 'assistant')
+        .map((m: any) => ({ role: m.role, content: m.content }));
+
+      const res = await invokeMantleAnthropicModel(mantleModelId, {
+        messages: anthropicMessages,
+        system,
+        max_tokens: reqBody.max_tokens || 1024,
+        temperature: reqBody.temperature,
+        stream: false,
+      });
+
+      if (res.statusCode === 200) {
+        try {
+          const parsed = JSON.parse(res.body);
+          const openAIResponse = {
+            id: parsed.id,
+            object: 'chat.completion',
+            created: Math.floor(Date.now() / 1000),
+            model: targetModel,
+            choices: [{
+              index: 0,
+              message: { role: 'assistant', content: parsed.content?.[0]?.text || '' },
+              finish_reason: parsed.stop_reason === 'end_turn' ? 'stop' : 'length',
+            }],
+            usage: {
+              prompt_tokens: parsed.usage?.input_tokens || 0,
+              completion_tokens: parsed.usage?.output_tokens || 0,
+              total_tokens: (parsed.usage?.input_tokens || 0) + (parsed.usage?.output_tokens || 0),
+            },
+          };
+          reply.status(200).send(JSON.stringify(openAIResponse));
+        } catch (e: any) {
+          reply.status(500).send({ error: { message: `Translation failed: ${e.message}` } });
+        }
+      } else {
+        reply.status(res.statusCode).send(res.body);
+      }
+      return;
+    }
+
+    // OSS Mantle models natively speak OpenAI — pass through directly
+    const res = await invokeMantleOssModel(mantleModelId, reqBody);
+    reply.status(res.statusCode).header('content-type', res.headers['content-type'] || 'application/json').send(res.body);
     return;
   }
 
