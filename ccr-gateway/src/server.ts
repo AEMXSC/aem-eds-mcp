@@ -64,6 +64,10 @@ const TOKEN_COSTS: Record<string, { input: number; output: number }> = {
   'mantle/gpt-oss-20b':            { input: 0.000001,   output: 0.000005  },
   'mantle/gpt-oss-120b':           { input: 0.000003,   output: 0.000015  },
   'mantle/qwen3-coder-next':       { input: 0.00000008, output: 0.00000008 },
+  'mantle/qwen3-coder-480b':       { input: 0.00000020, output: 0.00000020 },
+  'mantle/devstral-2-123b':        { input: 0.00000015, output: 0.00000015 },
+  'mantle/kimi-k2-thinking':       { input: 0.000002,   output: 0.000010   },
+  'mantle/mistral-large-3-675b':   { input: 0.000004,   output: 0.000012   },
   'mantle/deepseek-v3.2':          { input: 0.0000001,  output: 0.0000001  },
 };
 const DEFAULT_TOKEN_COST   = { input: 0.000003, output: 0.000015 };
@@ -656,7 +660,8 @@ const messagesHandler = async (req: any, reply: any) => {
         let res;
         if (mantleModelId === 'anthropic.claude-sonnet-4-6') {
           server.log.info({ correlationId }, 'Claude Sonnet 4.6 requested via Mantle. Falling back to native Bedrock SDK client.');
-          const bedrockRes = await invokeBedrockModel('bedrock/claude-3-5-sonnet', reqBody);
+          const sonnet46Entry = UNIFIED_MODEL_REGISTRY.find(m => m.id === 'bedrock/claude-sonnet-4-6');
+          const bedrockRes = await invokeBedrockModel('bedrock/claude-sonnet-4-6', reqBody, sonnet46Entry?.bedrockModelId);
           res = {
             statusCode: bedrockRes.statusCode,
             body: bedrockRes.body
@@ -671,7 +676,9 @@ const messagesHandler = async (req: any, reply: any) => {
             const parsed = JSON.parse(res.body);
             inputTokens  = parsed.usage?.input_tokens  || 0;
             outputTokens = parsed.usage?.output_tokens || 0;
-          } catch {}
+          } catch (e: any) {
+            server.log.warn({ correlationId, error: e.message }, 'Failed to parse Mantle token usage');
+          }
         }
       } else {
         const res = await invokeMantleOssModel(mantleModelId, reqBody);
@@ -728,7 +735,9 @@ const messagesHandler = async (req: any, reply: any) => {
         const parsed = JSON.parse(bedrockResponse.body);
         inputTokens = parsed.usage?.input_tokens || 0;
         outputTokens = parsed.usage?.output_tokens || 0;
-      } catch {}
+      } catch (e: any) {
+        server.log.warn({ correlationId, error: e.message }, 'Failed to parse Bedrock token usage');
+      }
     }
 
     const endTime = process.hrtime(startTime);
@@ -1111,13 +1120,14 @@ server.post('/v1/chat/completions', async (req, reply) => {
       let res;
       if (mantleModelId === 'anthropic.claude-sonnet-4-6') {
         server.log.info({ correlationId }, 'Claude Sonnet 4.6 requested via Mantle completions. Falling back to native Bedrock SDK client.');
-        const bedrockRes = await invokeBedrockModel('bedrock/claude-3-5-sonnet', {
+        const sonnet46Entry = UNIFIED_MODEL_REGISTRY.find(m => m.id === 'bedrock/claude-sonnet-4-6');
+        const bedrockRes = await invokeBedrockModel('bedrock/claude-sonnet-4-6', {
           messages: anthropicMessages,
           system,
           max_tokens: reqBody.max_tokens || 1024,
           temperature: reqBody.temperature,
           stream: false
-        });
+        }, sonnet46Entry?.bedrockModelId);
         res = {
           statusCode: bedrockRes.statusCode,
           body: bedrockRes.body
