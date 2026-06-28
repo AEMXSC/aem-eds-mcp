@@ -39,7 +39,21 @@ export interface RepoConfig {
   ignore_rules: string;
 }
 
+export interface FeedbackRecord {
+  id: string;
+  correlationId: string;
+  outcome: string;
+  rating: string;
+  comments: string;
+  timestamp: string;
+}
+
 import { PolicyRule, DEFAULT_RULES } from './policy.js';
+
+export interface RouteConfig {
+  activeRoute: string;
+  activeMode: string;
+}
 
 interface DatabaseSchema {
   request_events: RequestEvent[];
@@ -47,6 +61,9 @@ interface DatabaseSchema {
   spend_records: SpendRecord[];
   repo_configs: RepoConfig[];
   policy_rules: PolicyRule[];
+  feedback_records: FeedbackRecord[];
+  active_route?: string;
+  active_mode?: string;
 }
 
 /**
@@ -61,14 +78,17 @@ export async function readDb(): Promise<DatabaseSchema> {
       policy_hits: parsed.policy_hits || [],
       spend_records: parsed.spend_records || [],
       repo_configs: parsed.repo_configs || [],
-      policy_rules: parsed.policy_rules || []
+      policy_rules: parsed.policy_rules || [],
+      feedback_records: parsed.feedback_records || [],
+      active_route: parsed.active_route,
+      active_mode: parsed.active_mode
     };
   } catch (e: any) {
     if (e.code === 'ENOENT') {
-      return { request_events: [], policy_hits: [], spend_records: [], repo_configs: [], policy_rules: [] };
+      return { request_events: [], policy_hits: [], spend_records: [], repo_configs: [], policy_rules: [], feedback_records: [] };
     }
     console.error('Failed to read local database file, returning empty schema.');
-    return { request_events: [], policy_hits: [], spend_records: [], repo_configs: [], policy_rules: [] };
+    return { request_events: [], policy_hits: [], spend_records: [], repo_configs: [], policy_rules: [], feedback_records: [] };
   }
 }
 
@@ -231,6 +251,58 @@ export async function logSpendRecord(
   db.spend_records.push(newSpend);
   if (db.spend_records.length > 5000) {
     db.spend_records = db.spend_records.slice(-5000);
+  }
+  await writeDb(db);
+}
+
+/**
+ * Get the current active model route configuration.
+ */
+export async function getRouteConfig(): Promise<RouteConfig> {
+  const db = await readDb();
+  return {
+    activeRoute: db.active_route || 'aws-hosted/deepseek-coder-v2',
+    activeMode: db.active_mode || 'manual'
+  };
+}
+
+/**
+ * Save the active route and mode configuration.
+ */
+export async function saveRouteConfig(config: Partial<RouteConfig>): Promise<void> {
+  const db = await readDb();
+  if (config.activeRoute !== undefined) {
+    db.active_route = config.activeRoute;
+  }
+  if (config.activeMode !== undefined) {
+    db.active_mode = config.activeMode;
+  }
+  await writeDb(db);
+}
+
+/**
+ * Persist a feedback record for a completed request.
+ * Replaces the previous read-modify-write on ccr_telemetry.json,
+ * eliminating the concurrent-write race condition (#1).
+ */
+export async function logFeedback(
+  correlationId: string,
+  outcome: string,
+  rating: string,
+  comments: string
+): Promise<void> {
+  const db = await readDb();
+  const record: FeedbackRecord = {
+    id: uuidv4(),
+    correlationId,
+    outcome,
+    rating,
+    comments,
+    timestamp: new Date().toISOString()
+  };
+  db.feedback_records.push(record);
+  if (db.feedback_records.length > 5000) {
+    db.feedback_records = db.feedback_records.slice(-5000);
   }
   await writeDb(db);
 }

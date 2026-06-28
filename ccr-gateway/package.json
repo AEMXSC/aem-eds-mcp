@@ -9,6 +9,8 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1075.0",
+    "@aws-sdk/credential-providers": "^3.1075.0",
     "dotenv": "^16.4.5",
     "fastify": "^4.28.1",
     "pg": "^8.22.0",

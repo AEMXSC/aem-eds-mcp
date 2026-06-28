@@ -1,0 +1,232 @@
+export interface ModelRegistryEntry {
+  id: string;
+  name: string;
+  provider: string;
+  hosting: 'aws-hosted' | 'bedrock' | 'mantle' | 'internal' | 'developer-local';
+  cost: string;
+  supportedModes: string[];
+  policyTags: string[];
+  availabilityStatus: 'online' | 'offline';
+  aws_region: string;
+  health: 'healthy' | 'unhealthy';
+  /** Bedrock Mantle model identifier — only set for hosting === 'mantle'. */
+  mantleModelId?: string;
+}
+
+export const UNIFIED_MODEL_REGISTRY: ModelRegistryEntry[] = [
+
+  // ── EKS self-hosted OSS ──────────────────────────────────────────────────────
+  {
+    id: 'aws-hosted/qwen-coder-32b',
+    name: 'Fast Code (AWS)',
+    provider: 'alibaba',
+    hosting: 'aws-hosted',
+    cost: '$0.00018 / 1k tokens (Est. Savings: 85%)',
+    supportedModes: ['manual', 'suggested', 'auto'],
+    policyTags: ['low-cost', 'code-only', 'oss'],
+    availabilityStatus: 'online',
+    aws_region: 'us-west-2',
+    health: 'healthy',
+  },
+  {
+    id: 'aws-hosted/deepseek-coder-v2',
+    name: 'Balanced Code (AWS)',
+    provider: 'deepseek',
+    hosting: 'aws-hosted',
+    cost: '$0.00014 / 1k tokens (Est. Savings: 90%)',
+    supportedModes: ['manual', 'suggested', 'auto'],
+    policyTags: ['low-cost', 'code-only', 'oss'],
+    availabilityStatus: 'online',
+    aws_region: 'us-west-2',
+    health: 'healthy',
+  },
+  {
+    id: 'aws-hosted/glm-coder-v2',
+    name: 'Experimental Code (AWS)',
+    provider: 'glm',
+    hosting: 'aws-hosted',
+    cost: '$0.00020 / 1k tokens (Est. Savings: 80%)',
+    supportedModes: ['manual', 'suggested', 'auto'],
+    policyTags: ['challenger', 'oss'],
+    availabilityStatus: 'online',
+    aws_region: 'us-west-2',
+    health: 'healthy',
+  },
+
+  // ── Bedrock native SDK (PrivateLink) ─────────────────────────────────────────
+  {
+    id: 'bedrock/claude-3-5-sonnet',
+    name: 'Claude Sonnet (Bedrock)',
+    provider: 'anthropic',
+    hosting: 'bedrock',
+    cost: '$0.00300 / 1k tokens (Premium PrivateLink)',
+    supportedModes: ['manual', 'suggested'],
+    policyTags: ['frontier', 'high-reasoning'],
+    availabilityStatus: 'online',
+    aws_region: 'us-east-1',
+    health: 'healthy',
+  },
+
+  // ── Bedrock Mantle — Anthropic (Messages API /anthropic/v1/messages) ─────────
+  // Anthropic models require separate CCR project access approval via AWS Sales.
+  // Set availabilityStatus: 'online' once enabled in the Mantle console.
+  {
+    id: 'mantle/claude-opus-4-8',
+    name: 'Claude Opus 4.8 (Mantle)',
+    provider: 'anthropic',
+    hosting: 'mantle',
+    cost: '$0.01500 / 1k tokens',
+    supportedModes: ['manual', 'suggested'],
+    policyTags: ['frontier', 'high-reasoning', 'mantle'],
+    availabilityStatus: 'offline',
+    aws_region: 'us-east-1',
+    health: 'unhealthy',
+    mantleModelId: 'anthropic.claude-opus-4-8',
+  },
+  {
+    id: 'mantle/claude-opus-4-7',
+    name: 'Claude Opus 4.7 (Mantle)',
+    provider: 'anthropic',
+    hosting: 'mantle',
+    cost: '$0.01500 / 1k tokens',
+    supportedModes: ['manual', 'suggested'],
+    policyTags: ['frontier', 'high-reasoning', 'mantle'],
+    availabilityStatus: 'offline',
+    aws_region: 'us-east-1',
+    health: 'unhealthy',
+    mantleModelId: 'anthropic.claude-opus-4-7',
+  },
+  {
+    id: 'mantle/claude-haiku-4-5',
+    name: 'Claude Haiku 4.5 (Mantle)',
+    provider: 'anthropic',
+    hosting: 'mantle',
+    cost: '$0.00080 / 1k tokens',
+    supportedModes: ['manual', 'suggested', 'auto'],
+    policyTags: ['low-cost', 'mantle'],
+    availabilityStatus: 'offline',
+    aws_region: 'us-east-1',
+    health: 'unhealthy',
+    mantleModelId: 'anthropic.claude-haiku-4-5',
+  },
+
+  // ── Bedrock Mantle — OSS (Chat Completions API /v1/chat/completions) ─────────
+  {
+    id: 'mantle/grok-4.3',
+    name: 'Grok 4.3 (Mantle)',
+    provider: 'xai',
+    hosting: 'mantle',
+    cost: '$0.00300 / 1k tokens (Est.)',
+    supportedModes: ['manual', 'suggested'],
+    policyTags: ['frontier', 'high-reasoning', 'oss', 'mantle'],
+    availabilityStatus: 'offline',
+    aws_region: 'us-east-1',
+    health: 'unhealthy',
+    mantleModelId: 'xai.grok-4.3',
+  },
+  {
+    id: 'mantle/qwen3-coder-480b',
+    name: 'Qwen3 Coder 480B (Mantle)',
+    provider: 'alibaba',
+    hosting: 'mantle',
+    cost: '$0.00020 / 1k tokens (Est.)',
+    supportedModes: ['manual', 'suggested', 'auto'],
+    policyTags: ['frontier', 'code-only', 'oss', 'mantle'],
+    availabilityStatus: 'online',
+    aws_region: 'us-east-1',
+    health: 'healthy',
+    mantleModelId: 'qwen.qwen3-coder-480b-a35b-instruct',
+  },
+  {
+    id: 'mantle/devstral-2-123b',
+    name: 'Devstral 2 123B (Mantle)',
+    provider: 'mistral',
+    hosting: 'mantle',
+    cost: '$0.00015 / 1k tokens (Est.)',
+    supportedModes: ['manual', 'suggested', 'auto'],
+    policyTags: ['code-only', 'oss', 'mantle'],
+    availabilityStatus: 'online',
+    aws_region: 'us-east-1',
+    health: 'healthy',
+    mantleModelId: 'mistral.devstral-2-123b',
+  },
+  {
+    id: 'mantle/kimi-k2-thinking',
+    name: 'Kimi K2 Thinking (Mantle)',
+    provider: 'moonshotai',
+    hosting: 'mantle',
+    cost: '$0.00200 / 1k tokens (Est.)',
+    supportedModes: ['manual', 'suggested'],
+    policyTags: ['high-reasoning', 'oss', 'mantle'],
+    availabilityStatus: 'online',
+    aws_region: 'us-east-1',
+    health: 'healthy',
+    mantleModelId: 'moonshotai.kimi-k2-thinking',
+  },
+  {
+    id: 'mantle/mistral-large-3-675b',
+    name: 'Mistral Large 3 675B (Mantle)',
+    provider: 'mistral',
+    hosting: 'mantle',
+    cost: '$0.00400 / 1k tokens (Est.)',
+    supportedModes: ['manual', 'suggested'],
+    policyTags: ['frontier', 'high-reasoning', 'oss', 'mantle'],
+    availabilityStatus: 'online',
+    aws_region: 'us-east-1',
+    health: 'healthy',
+    mantleModelId: 'mistral.mistral-large-3-675b-instruct',
+  },
+  {
+    id: 'mantle/gpt-5.5',
+    name: 'GPT-5.5 (Mantle)',
+    provider: 'openai',
+    hosting: 'mantle',
+    cost: '$0.00500 / 1k tokens',
+    supportedModes: ['manual', 'suggested', 'auto'],
+    policyTags: ['frontier', 'oss', 'mantle'],
+    availabilityStatus: 'offline',
+    aws_region: 'us-east-1',
+    health: 'unhealthy',
+    mantleModelId: 'openai.gpt-5.5',
+  },
+  {
+    id: 'mantle/qwen3-coder-next',
+    name: 'Qwen3 Coder (Mantle)',
+    provider: 'alibaba',
+    hosting: 'mantle',
+    cost: '$0.00008 / 1k tokens (Est. Savings: 95%)',
+    supportedModes: ['manual', 'suggested', 'auto'],
+    policyTags: ['low-cost', 'code-only', 'oss', 'mantle'],
+    availabilityStatus: 'online',
+    aws_region: 'us-east-1',
+    health: 'healthy',
+    mantleModelId: 'qwen.qwen3-coder-next',
+  },
+  {
+    id: 'mantle/deepseek-v3.2',
+    name: 'DeepSeek V3.2 (Mantle)',
+    provider: 'deepseek',
+    hosting: 'mantle',
+    cost: '$0.00010 / 1k tokens (Est. Savings: 92%)',
+    supportedModes: ['manual', 'suggested', 'auto'],
+    policyTags: ['low-cost', 'code-only', 'oss', 'mantle'],
+    availabilityStatus: 'online',
+    aws_region: 'us-east-1',
+    health: 'healthy',
+    mantleModelId: 'deepseek.v3.2',
+  },
+
+  // ── Internal / VPN ───────────────────────────────────────────────────────────
+  {
+    id: 'internal/adobe-codex-v2',
+    name: 'Internal Secure Route',
+    provider: 'internal',
+    hosting: 'internal',
+    cost: '$0.00 (Enterprise VPN Licensed)',
+    supportedModes: ['manual', 'suggested', 'auto'],
+    policyTags: ['internal', 'secure'],
+    availabilityStatus: 'online',
+    aws_region: 'local-vpc',
+    health: 'healthy',
+  },
+];
