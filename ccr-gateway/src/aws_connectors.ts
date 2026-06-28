@@ -5,6 +5,13 @@ import * as dotenv from 'dotenv';
 
 dotenv.config();
 
+const log = {
+  error: (msg: string, err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(JSON.stringify({ level: 'error', msg, error: message, time: Date.now() }) + '\n');
+  },
+};
+
 const AWS_REGION = process.env.AWS_REGION || 'us-west-2';
 const BEDROCK_ENDPOINT = process.env.BEDROCK_ENDPOINT; // AWS PrivateLink VPC interface endpoint
 const VLLM_ENDPOINT = process.env.VLLM_ENDPOINT || 'http://localhost:8000'; // EKS-hosted vLLM endpoint
@@ -22,7 +29,8 @@ function getBedrockClient(): BedrockRuntimeClient {
   return bedrockClient;
 }
 
-const BEDROCK_MANTLE_URL = process.env.BEDROCK_MANTLE_URL || 'https://bedrock-mantle.us-east-1.api.aws/anthropic';
+const MANTLE_BASE        = process.env.BEDROCK_MANTLE_BASE_URL || 'https://bedrock-mantle.us-east-1.api.aws';
+const BEDROCK_MANTLE_URL = `${MANTLE_BASE}/anthropic`;
 const AWS_BEARER_TOKEN_BEDROCK = process.env.AWS_BEARER_TOKEN_BEDROCK;
 
 /**
@@ -35,7 +43,7 @@ export async function invokeBedrockModel(
   // Native AWS Bedrock Runtime Client (PrivateLink).
   // Mantle routing is handled by the dedicated mantle/ branch in server.ts.
   const client = getBedrockClient();
-  
+
   // Map Anthropic route to Bedrock resource ID
   const bedrockModelId = modelId.includes('claude-3-5-sonnet')
     ? 'anthropic.claude-3-5-sonnet-20241022-v2:0'
@@ -69,7 +77,7 @@ export async function invokeBedrockModel(
       body: responseBody
     };
   } catch (err: any) {
-    console.error(`AWS Bedrock invocation error: ${err.message}`);
+    log.error('AWS Bedrock invocation error', err);
     return {
       statusCode: err.$metadata?.httpStatusCode || 500,
       body: JSON.stringify({
@@ -151,7 +159,7 @@ export async function invokeVllmModel(
       body: bodyText
     };
   } catch (err: any) {
-    console.error(`EKS vLLM connection error: ${err.message}`);
+    log.error('EKS vLLM connection error', err);
     return {
       statusCode: 503,
       headers: { 'content-type': 'application/json' },
@@ -202,7 +210,7 @@ export async function invokeMantleAnthropicModel(
     });
     return { statusCode: res.statusCode, body: await res.body.text() };
   } catch (err: any) {
-    console.error(`Mantle Anthropic API error: ${err.message}`);
+    log.error('Mantle Anthropic API error', err);
     return {
       statusCode: 503,
       body: JSON.stringify({ error: { type: 'api_error', message: `Bedrock Mantle error: ${err.message}` } }),
@@ -226,8 +234,8 @@ export async function invokeMantleOssModel(
       body: JSON.stringify({ error: { type: 'api_error', message: 'AWS_BEARER_TOKEN_BEDROCK is not configured.' } }),
     };
   }
-  const mantleBaseUrl = BEDROCK_MANTLE_URL.replace('/anthropic', '');
-  const openAIPayload  = translateAnthropicToOpenAI(reqBody, mantleModelId);
+  const mantleBaseUrl = MANTLE_BASE;
+  const openAIPayload = translateAnthropicToOpenAI(reqBody, mantleModelId);
   try {
     const res = await request(`${mantleBaseUrl}/v1/chat/completions`, {
       method: 'POST',
@@ -238,11 +246,11 @@ export async function invokeMantleOssModel(
       body: JSON.stringify(openAIPayload),
       headersTimeout: 30000,
     });
-    const bodyText    = await res.body.text();
+    const bodyText = await res.body.text();
     const contentType = (res.headers['content-type'] as string) || 'application/json';
     return { statusCode: res.statusCode, headers: { 'content-type': contentType }, body: bodyText };
   } catch (err: any) {
-    console.error(`Mantle OSS model error: ${err.message}`);
+    log.error('Mantle OSS model error', err);
     return {
       statusCode: 503,
       headers: { 'content-type': 'application/json' },
@@ -272,7 +280,7 @@ export async function checkVllmHealth(): Promise<boolean> {
 export function translateOpenAIToAnthropic(openAIResponse: any, modelId: string): any {
   const choice = openAIResponse.choices?.[0];
   const contentText = choice?.message?.content || '';
-  
+
   let stopReason = 'end_turn';
   if (choice?.finish_reason === 'length') {
     stopReason = 'max_tokens';

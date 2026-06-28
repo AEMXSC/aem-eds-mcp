@@ -55,7 +55,6 @@ const TOKEN_COSTS: Record<string, { input: number; output: number }> = {
   'aws-hosted/glm-coder-v2':       { input: 0.00000020, output: 0.00000020 },
   'bedrock/claude-3-5-sonnet':     { input: 0.000003,   output: 0.000015  },
   // Bedrock Mantle — Anthropic
-  'mantle/claude-fable-5':         { input: 0.000003,   output: 0.000015  },
   'mantle/claude-opus-4-8':        { input: 0.000015,   output: 0.000075  },
   'mantle/claude-sonnet-4-6':      { input: 0.000003,   output: 0.000015  },
   'mantle/claude-haiku-4-5':       { input: 0.0000008,  output: 0.000004  },
@@ -381,7 +380,7 @@ function classifyTask(promptText: string): { suggestedRoute: string; reason: str
 
 // ── Primary Gateway: Anthropic Messages proxy ─────────────────────────────────
 
-server.post('/v1/messages', async (req, reply) => {
+const messagesHandler = async (req: any, reply: any) => {
   const correlationId = uuidv4();
   const startTime     = process.hrtime();
 
@@ -644,38 +643,44 @@ server.post('/v1/messages', async (req, reply) => {
     }
 
     const isAnthropicModel = registryEntry?.provider === 'anthropic';
-    let mantleStatusCode: number;
-    let mantleBody: string;
+    let mantleStatusCode: number = 500;
+    let mantleBody: string = JSON.stringify({ error: { type: 'api_error', message: 'No response body received from Mantle.' } });
     let inputTokens = 0;
     let outputTokens = 0;
 
-    if (isAnthropicModel) {
-      const res = await invokeMantleAnthropicModel(mantleModelId, reqBody);
-      mantleStatusCode = res.statusCode;
-      mantleBody       = res.body;
-      if (res.statusCode === 200) {
-        try {
-          const parsed = JSON.parse(res.body);
-          inputTokens  = parsed.usage?.input_tokens  || 0;
-          outputTokens = parsed.usage?.output_tokens || 0;
-        } catch {}
-      }
-    } else {
-      const res = await invokeMantleOssModel(mantleModelId, reqBody);
-      mantleStatusCode = res.statusCode;
-      if (res.statusCode === 200) {
-        try {
-          const parsed = JSON.parse(res.body);
-          inputTokens  = parsed.usage?.prompt_tokens     || 0;
-          outputTokens = parsed.usage?.completion_tokens || 0;
-          const translated = translateOpenAIToAnthropic(parsed, chosenRouteId);
-          mantleBody = JSON.stringify(translated);
-        } catch {
-          mantleBody = res.body;
+    try {
+      if (isAnthropicModel) {
+        const res = await invokeMantleAnthropicModel(mantleModelId, reqBody);
+        mantleStatusCode = res.statusCode;
+        mantleBody       = res.body;
+        if (res.statusCode === 200) {
+          try {
+            const parsed = JSON.parse(res.body);
+            inputTokens  = parsed.usage?.input_tokens  || 0;
+            outputTokens = parsed.usage?.output_tokens || 0;
+          } catch {}
         }
       } else {
-        mantleBody = res.body;
+        const res = await invokeMantleOssModel(mantleModelId, reqBody);
+        mantleStatusCode = res.statusCode;
+        if (res.statusCode === 200) {
+          try {
+            const parsed = JSON.parse(res.body);
+            inputTokens  = parsed.usage?.prompt_tokens     || 0;
+            outputTokens = parsed.usage?.completion_tokens || 0;
+            const translated = translateOpenAIToAnthropic(parsed, chosenRouteId);
+            mantleBody = JSON.stringify(translated);
+          } catch {
+            mantleBody = res.body;
+          }
+        } else {
+          mantleBody = res.body;
+        }
       }
+    } catch (err: any) {
+      server.log.error({ correlationId, error: err.message }, 'Mantle connector threw unexpectedly');
+      mantleStatusCode = 503;
+      mantleBody = JSON.stringify({ error: { type: 'api_error', message: `Mantle connector error: ${err.message}` } });
     }
 
     const endTime   = process.hrtime(startTime);
@@ -693,7 +698,7 @@ server.post('/v1/messages', async (req, reply) => {
     reply.header('x-ccr-mantle-model', mantleModelId);
     reply.header('x-correlation-id', correlationId);
     reply.header('content-type', 'application/json');
-    reply.status(mantleStatusCode!).send(mantleBody!);
+    reply.status(mantleStatusCode).send(mantleBody);
     return;
   }
 
@@ -848,20 +853,11 @@ server.post('/v1/messages', async (req, reply) => {
     await logRequestEvent(correlationId, targetModel, 'anthropic', 502, latencyMs);
     reply.status(502).send({ error: { type: 'api_error', message: 'ccr Gateway: Upstream connection failed.' } });
   }
-});
+};
 
-// ── Anthropic path alias — Claude Code uses /anthropic/v1/messages ───────────
-server.post('/anthropic/v1/messages', async (req, reply) => {
-  return server.inject({ method: 'POST', url: '/v1/messages', headers: req.headers as Record<string, string>, payload: JSON.stringify(req.body) }).then(res => {
-    reply.status(res.statusCode);
-    const ct = res.headers['content-type'];
-    if (ct) reply.header('content-type', ct as string);
-    Object.entries(res.headers).forEach(([k, v]) => {
-      if (k.startsWith('x-ccr') || k.startsWith('x-correlation')) reply.header(k, v as string);
-    });
-    reply.send(res.rawPayload);
-  });
-});
+server.post('/v1/messages', messagesHandler);
+// Alias: Claude Code targeting ANTHROPIC_BASE_URL=http://localhost:8080/anthropic calls this path
+server.post('/anthropic/v1/messages', messagesHandler);
 
 // ── OpenAI Chat Completions Endpoint ──────────────────────────────────────────
 server.post('/v1/chat/completions', async (req, reply) => {
