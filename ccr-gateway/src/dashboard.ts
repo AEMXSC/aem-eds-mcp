@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { UNIFIED_MODEL_REGISTRY } from './model_registry.js';
 
 const DB_FILE = path.join(process.cwd(), 'ccr_database.json');
 
@@ -13,7 +14,7 @@ interface DatabaseSchema {
   active_mode?: string;
 }
 
-function getDbData(): DatabaseSchema {
+export function getDbData(): DatabaseSchema {
   if (!fs.existsSync(DB_FILE)) {
     return { request_events: [], policy_hits: [], spend_records: [], repo_configs: [], policy_rules: [] };
   }
@@ -34,7 +35,7 @@ function getDbData(): DatabaseSchema {
   }
 }
 
-function escapeHtml(str: string): string {
+export function escapeHtml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -46,20 +47,23 @@ function escapeHtml(str: string): string {
 /**
  * Returns a visually stunning Adobe Spectrum styled HTML dashboard page.
  */
-export function renderDashboard(vllmHealthy = true, vpnHealthy = true): string {
+export async function renderDashboard(vllmHealthy = true, vpnHealthy = true): Promise<string> {
   const db = getDbData();
-  
+
+  const telemetryFile = path.join(process.cwd(), 'ccr_telemetry.json');
+  let telemetryList: any[] = [];
+  try {
+    const raw = await fs.promises.readFile(telemetryFile, 'utf8');
+    telemetryList = JSON.parse(raw);
+  } catch (e: any) {
+    if (e.code !== 'ENOENT') process.stderr.write(`Failed to read telemetry: ${e.message}\n`);
+  }
+
   // Resolve active IDE route display
   const activeRouteId = db.active_route || 'aws-hosted/deepseek-coder-v2';
   const activeMode = db.active_mode || 'manual';
   
-  const models = [
-    { id: 'aws-hosted/qwen-coder-32b', name: 'Fast Code (AWS)' },
-    { id: 'aws-hosted/deepseek-coder-v2', name: 'Balanced Code (AWS)' },
-    { id: 'aws-hosted/glm-coder-v2', name: 'Experimental Code (AWS)' },
-    { id: 'bedrock/claude-3-5-sonnet', name: 'Claude Sonnet (Bedrock)' },
-    { id: 'internal/adobe-codex-v2', name: 'Internal Secure Route' }
-  ];
+  const models = UNIFIED_MODEL_REGISTRY;
   const matched = models.find(m => m.id === activeRouteId);
   const activeModelName = matched ? matched.name : activeRouteId;
   const capitalizedMode = activeMode.charAt(0).toUpperCase() + activeMode.slice(1);
@@ -100,7 +104,8 @@ export function renderDashboard(vllmHealthy = true, vpnHealthy = true): string {
 
   // Calculate requests counts and latency parameters
   db.request_events.forEach(e => {
-    const routeId = e.model;
+    const tel = telemetryList.find(t => t.correlationId === e.correlation_id);
+    const routeId = tel ? tel.chosenRoute : e.model;
     if (routeMetrics[routeId]) {
       routeMetrics[routeId].totalTasks += 1;
       const count = routeMetrics[routeId].totalTasks;
@@ -113,7 +118,8 @@ export function renderDashboard(vllmHealthy = true, vpnHealthy = true): string {
   // Calculate actual vs baseline economics
   db.spend_records.forEach(s => {
     const req = db.request_events.find(e => e.correlation_id === s.correlation_id);
-    const targetModelId = req ? req.model : activeRouteId;
+    const tel = telemetryList.find(t => t.correlationId === s.correlation_id);
+    const targetModelId = tel ? tel.chosenRoute : (req ? req.model : activeRouteId);
     if (routeMetrics[targetModelId]) {
       routeMetrics[targetModelId].actualCost += s.actual_cost || 0;
       routeMetrics[targetModelId].baselineCost += s.baseline_cost || 0;
@@ -124,7 +130,8 @@ export function renderDashboard(vllmHealthy = true, vpnHealthy = true): string {
   // Calculate outcome feedback metrics
   feedbackList.forEach((f: any) => {
     const req = db.request_events.find(e => e.correlation_id === f.correlationId);
-    const targetModelId = req ? req.model : activeRouteId;
+    const tel = telemetryList.find(t => t.correlationId === f.correlationId);
+    const targetModelId = tel ? tel.chosenRoute : (req ? req.model : activeRouteId);
     if (routeMetrics[targetModelId]) {
       routeMetrics[targetModelId].feedbackCount += 1;
       if (f.outcome === 'kept') routeMetrics[targetModelId].keptCount += 1;
@@ -150,29 +157,43 @@ export function renderDashboard(vllmHealthy = true, vpnHealthy = true): string {
   const totalSavings = Math.max(0, totalBaselineCost - totalActualCost);
 
   // Generate route-lane metrics rows
-  const analyticsRows = Object.keys(routeMetrics).map(id => {
-    const m = routeMetrics[id];
-    const keepRate = m.feedbackCount > 0 ? Math.round((m.keptCount / m.feedbackCount) * 100) : 0;
-    const reworkRate = m.feedbackCount > 0 ? Math.round((m.reworkedCount / m.feedbackCount) * 100) : 0;
-    const abandonRate = m.feedbackCount > 0 ? Math.round((m.abandonedCount / m.feedbackCount) * 100) : 0;
+  const analyticsRows = Object.keys(routeMetrics)
+    .sort((a, b) => routeMetrics[b].totalTasks - routeMetrics[a].totalTasks)
+    .map((id, index) => {
+      const m = routeMetrics[id];
+      const keepRate = m.feedbackCount > 0 ? Math.round((m.keptCount / m.feedbackCount) * 100) : 0;
+      const reworkRate = m.feedbackCount > 0 ? Math.round((m.reworkedCount / m.feedbackCount) * 100) : 0;
+      const abandonRate = m.feedbackCount > 0 ? Math.round((m.abandonedCount / m.feedbackCount) * 100) : 0;
 
-    const displayKeep = m.feedbackCount > 0 ? `${keepRate}%` : '0%';
-    const displayRework = m.feedbackCount > 0 ? `${reworkRate}%` : '0%';
-    const displayAbandon = m.feedbackCount > 0 ? `${abandonRate}%` : '0%';
+      const displayKeep = m.feedbackCount > 0 ? `${keepRate}%` : '0%';
+      const displayRework = m.feedbackCount > 0 ? `${reworkRate}%` : '0%';
+      const displayAbandon = m.feedbackCount > 0 ? `${abandonRate}%` : '0%';
 
-    return `
-      <tr>
-        <td><strong>${escapeHtml(m.name)}</strong></td>
-        <td>${m.totalTasks}</td>
-        <td>${m.avgLatency}ms</td>
-        <td>$${m.actualCost.toFixed(4)}</td>
-        <td style="color: var(--spectrum-accent-green); font-weight: 600;">$${m.savings.toFixed(4)}</td>
-        <td><span class="status-indicator status-allow">${displayKeep}</span></td>
-        <td><span class="status-indicator status-warn">${displayRework}</span></td>
-        <td><span class="status-indicator status-block">${displayAbandon}</span></td>
-      </tr>
-    `;
-  }).join('');
+      const isHidden = index >= 10;
+      const rowClass = isHidden ? 'class="extra-route-row" style="display: none;"' : '';
+
+      return `
+        <tr ${rowClass}>
+          <td><strong>${escapeHtml(m.name)}</strong></td>
+          <td>${m.totalTasks}</td>
+          <td>${m.avgLatency}ms</td>
+          <td>$${m.actualCost.toFixed(4)}</td>
+          <td style="color: var(--spectrum-accent-green); font-weight: 600;">$${m.savings.toFixed(4)}</td>
+          <td><span class="status-indicator status-allow">${displayKeep}</span></td>
+          <td><span class="status-indicator status-warn">${displayRework}</span></td>
+          <td><span class="status-indicator status-block">${displayAbandon}</span></td>
+        </tr>
+      `;
+    }).join('');
+
+  const showToggleBtn = Object.keys(routeMetrics).length > 10;
+  const toggleBtnHtml = showToggleBtn
+    ? `
+      <div style="text-align: center; margin-top: 1rem;">
+        <button id="btn-toggle-routes" class="btn-spectrum secondary" style="border-radius: 16px; font-size: 0.8rem; padding: 0.4rem 1.2rem;" onclick="toggleExtraRoutes()">Show All Route Lanes</button>
+      </div>
+    `
+    : '';
 
   // Generate request rows (render full list so client-side filter can manage pagination/searching)
   const requestRows = db.request_events.map(e => {
@@ -182,11 +203,20 @@ export function renderDashboard(vllmHealthy = true, vpnHealthy = true): string {
     const statusClass = isBlock ? 'status-block' : isWarn ? 'status-warn' : isError ? 'status-block' : 'status-allow';
     const actionText = isBlock ? 'Blocked' : isWarn ? 'Warned' : 'Allowed';
     const cleanId = escapeHtml(e.correlation_id);
+
+    const tel = telemetryList.find(t => t.correlationId === e.correlation_id);
+    const chosenRoute = tel ? tel.chosenRoute : '';
+    const displayModel = chosenRoute && chosenRoute !== e.model
+      ? `${escapeHtml(e.model)} &rarr; <span class="chosen-badge">${escapeHtml(chosenRoute)}</span>`
+      : `<code>${escapeHtml(e.model)}</code>`;
+
+    const searchTokens = [e.model, chosenRoute].filter(Boolean).join(' ').toLowerCase();
+
     return `
-      <tr class="log-row" data-id="${cleanId}" data-action="${actionText.toLowerCase()}" data-model="${escapeHtml(e.model.toLowerCase())}" data-timestamp="${e.timestamp}">
+      <tr class="log-row" data-id="${cleanId}" data-action="${actionText.toLowerCase()}" data-model="${escapeHtml(searchTokens)}" data-timestamp="${e.timestamp}">
         <td><button onclick="showRequestDetail('${cleanId}')" class="detail-link"><code>${cleanId.substring(0, 8)}</code></button></td>
         <td class="time-cell" data-val="${e.timestamp}">${new Date(e.timestamp).toLocaleString()}</td>
-        <td><code>${escapeHtml(e.model)}</code></td>
+        <td>${displayModel}</td>
         <td><span class="status-indicator ${statusClass}">${e.status} (${actionText})</span></td>
         <td>${e.latency_ms}ms</td>
       </tr>
@@ -441,17 +471,17 @@ export function renderDashboard(vllmHealthy = true, vpnHealthy = true): string {
         .metric-card {
           background-color: var(--spectrum-panel);
           border: 1px solid var(--spectrum-border);
+          border-top: 2px solid var(--spectrum-accent-blue);
           border-radius: 4px;
           padding: 1.25rem;
-          border-left: 3px solid var(--spectrum-accent-blue);
         }
 
         .metric-card.blocked {
-          border-left-color: var(--spectrum-accent-red);
+          border-top-color: var(--spectrum-accent-red);
         }
 
         .metric-card.savings {
-          border-left-color: var(--spectrum-accent-green);
+          border-top-color: var(--spectrum-accent-green);
         }
 
         .metric-title {
@@ -945,6 +975,18 @@ export function renderDashboard(vllmHealthy = true, vpnHealthy = true): string {
         .drawer-meta-item.span-2 {
           grid-column: span 2;
         }
+
+        .chosen-badge {
+          background-color: rgba(20, 115, 230, 0.15);
+          color: var(--spectrum-accent-blue);
+          font-size: 0.72rem;
+          padding: 0.15rem 0.35rem;
+          border-radius: 4px;
+          font-family: monospace;
+          font-weight: 600;
+          display: inline-block;
+          margin-left: 0.25rem;
+        }
       </style>
     </head>
     <body>
@@ -1071,6 +1113,7 @@ export function renderDashboard(vllmHealthy = true, vpnHealthy = true): string {
                 </tbody>
               </table>
             </div>
+            ${toggleBtnHtml}
           </div>
 
           <!-- TAB 1: MAIN TRAFFIC PANEL -->
@@ -1298,6 +1341,15 @@ export function renderDashboard(vllmHealthy = true, vpnHealthy = true): string {
         const REQUEST_EVENTS = ${JSON.stringify(db.request_events).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')};
         const POLICY_HITS = ${JSON.stringify(db.policy_hits).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')};
         const SPEND_RECORDS = ${JSON.stringify(db.spend_records).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')};
+
+        let extraRoutesVisible = false;
+        function toggleExtraRoutes() {
+          extraRoutesVisible = !extraRoutesVisible;
+          const rows = document.querySelectorAll('.extra-route-row');
+          rows.forEach(r => r.style.display = extraRoutesVisible ? '' : 'none');
+          const btn = document.getElementById('btn-toggle-routes');
+          btn.innerText = extraRoutesVisible ? 'Show Less' : 'Show All Route Lanes';
+        }
 
         // Tab selection logic
         function switchTab(tabId) {
@@ -1529,229 +1581,3 @@ export function renderDashboard(vllmHealthy = true, vpnHealthy = true): string {
   `;
 }
 
-/**
- * Returns a print-ready CISO Rollout Approval report styled cleanly for printing.
- */
-export function renderCisoReport(): string {
-  const db = getDbData();
-  const totalBlocked = db.policy_hits.filter(h => h.action === 'block').length;
-
-  const ruleSummary = db.policy_hits.slice(-30).reverse().map(h => {
-    return `
-      <tr>
-        <td><code>${escapeHtml(h.correlation_id.substring(0, 8))}</code></td>
-        <td>${new Date(h.timestamp).toLocaleString()}</td>
-        <td><code>${escapeHtml(h.rule_id)}</code></td>
-        <td><strong>${escapeHtml(h.action.toUpperCase())}</strong></td>
-        <td><small>${escapeHtml(h.matched_value || 'Sensitive regex prompt warning')}</small></td>
-      </tr>
-    `;
-  }).join('');
-
-  const activeRulesRows = (db.policy_rules || []).map(r => {
-    return `
-      <tr>
-        <td><code>${escapeHtml(r.id)}</code></td>
-        <td><strong>${escapeHtml(r.name)}</strong></td>
-        <td><code>${escapeHtml(r.pattern)}</code></td>
-        <td><code>${escapeHtml(r.type)}</code></td>
-        <td><strong>${escapeHtml(r.mode.toUpperCase())}</strong></td>
-      </tr>
-    `;
-  }).join('');
-
-  return `
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <title>CISO AI-Agent Rollout Compliance Report</title>
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-      <style>
-        body {
-          font-family: 'Inter', sans-serif;
-          background-color: #ffffff;
-          color: #1e293b;
-          padding: 3rem;
-          max-width: 900px;
-          margin: 0 auto;
-          line-height: 1.6;
-        }
-
-        .report-header {
-          border-bottom: 2px solid #e2e8f0;
-          padding-bottom: 1.5rem;
-          margin-bottom: 2rem;
-        }
-
-        .report-title {
-          font-size: 1.75rem;
-          font-weight: 700;
-          color: #0f172a;
-          margin-bottom: 0.5rem;
-        }
-
-        .meta-grid {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 1.5rem;
-          background: #f8fafc;
-          padding: 1.5rem;
-          border-radius: 8px;
-          margin-bottom: 2.5rem;
-          border: 1px solid #e2e8f0;
-        }
-
-        .meta-item label {
-          font-size: 0.75rem;
-          text-transform: uppercase;
-          color: #64748b;
-          font-weight: 600;
-        }
-
-        .meta-item p {
-          font-size: 1rem;
-          font-weight: 500;
-          color: #0f172a;
-          margin-top: 0.25rem;
-        }
-
-        h2 {
-          font-size: 1.25rem;
-          color: #0f172a;
-          margin-top: 2rem;
-          margin-bottom: 1rem;
-          border-left: 4px solid #1473e6;
-          padding-left: 0.75rem;
-        }
-
-        p.summary-text {
-          margin-bottom: 1.5rem;
-        }
-
-        table {
-          width: 100%;
-          border-collapse: collapse;
-          margin-bottom: 2rem;
-          text-align: left;
-        }
-
-        th, td {
-          padding: 0.75rem 1rem;
-          border-bottom: 1px solid #e2e8f0;
-          font-size: 0.875rem;
-        }
-
-        th {
-          background: #f1f5f9;
-          color: #475569;
-          font-weight: 600;
-        }
-
-        code {
-          font-family: monospace;
-          background: #f1f5f9;
-          padding: 0.15rem 0.35rem;
-          border-radius: 4px;
-        }
-
-        .btn-print {
-          background: #1473e6;
-          color: white;
-          border: none;
-          padding: 0.75rem 1.5rem;
-          border-radius: 16px;
-          font-weight: 600;
-          cursor: pointer;
-          font-size: 0.875rem;
-          box-shadow: 0 4px 6px -1px rgba(20, 115, 230, 0.2);
-          transition: background 0.2s;
-        }
-
-        .btn-print:hover {
-          background: #0d66d0;
-        }
-
-        .nav-link {
-          color: #1473e6;
-          text-decoration: none;
-          font-weight: 500;
-          display: inline-block;
-          margin-bottom: 1.5rem;
-        }
-
-        @media print {
-          .btn-print, .nav-link {
-            display: none;
-          }
-          body {
-            padding: 0;
-          }
-        }
-      </style>
-    </head>
-    <body>
-      <a href="/admin/dashboard" class="nav-link">&larr; Back to Dashboard</a>
-      
-      <div class="report-header">
-        <h1 class="report-title">ccr Security Control Plane Evaluation Report</h1>
-        <p style="color: #64748b;">Telemetry audit and compliance evidence for pilot rollout approval.</p>
-      </div>
-
-      <div class="meta-grid">
-        <div class="meta-item">
-          <label>Evaluation Period</label>
-          <p>June 2026</p>
-        </div>
-        <div class="meta-item">
-          <label>Total Exfiltrations Intercepted</label>
-          <p style="color: #d7373f; font-weight: 700;">${totalBlocked} Blocked</p>
-        </div>
-        <div class="meta-item">
-          <label>Approved Rollout Status</label>
-          <p style="color: #12805c; font-weight: 700;">PASSED</p>
-        </div>
-      </div>
-
-      <h2>1. Executive Rollout Summary</h2>
-      <p class="summary-text">
-        This document serves as compliance evidence proving that AI coding agents (Claude Code) deployed inside the pilot network are bound by code-aware boundary controls. By routing traffic through <strong><code>ccr-gateway</code></strong>, security policy enforcement was applied natively at the API boundary, validating that exfiltration of configuration secrets (.env) and credential paths was fully prevented prior to leaving the VPC border.
-      </p>
-
-      <h2>2. Active Security Configurations</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Rule ID</th>
-            <th>Name</th>
-            <th>Pattern Matcher</th>
-            <th>Type</th>
-            <th>Mode</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${activeRulesRows || '<tr><td colspan="5" style="text-align:center; color:#64748b;">No security configurations active.</td></tr>'}
-        </tbody>
-      </table>
-
-      <h2>3. Telemetric Audit Evidence</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Req ID</th>
-            <th>Timestamp</th>
-            <th>Rule Triggered</th>
-            <th>Enforcement</th>
-            <th>Details</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${ruleSummary || '<tr><td colspan="5" style="text-align:center; color:#64748b;">No policy alerts logged in this audit scope.</td></tr>'}
-        </tbody>
-      </table>
-
-      <button class="btn-print" onclick="window.print()">Export / Print Report</button>
-    </body>
-    </html>
-  `;
-}

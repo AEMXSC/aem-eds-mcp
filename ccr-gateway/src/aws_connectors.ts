@@ -5,6 +5,50 @@ import * as dotenv from 'dotenv';
 
 dotenv.config();
 
+// ── Request body types ────────────────────────────────────────────────────────
+
+export interface ContentBlock {
+  type: 'text' | 'tool_use' | 'tool_result' | string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: unknown;
+  tool_use_id?: string;
+  content?: string | ContentBlock[];
+}
+
+export interface AnthropicMessage {
+  role: string;
+  content: string | ContentBlock[];
+}
+
+export interface AnthropicRequestBody {
+  model?:          string;
+  messages?:       AnthropicMessage[];
+  system?:         string;
+  max_tokens?:     number;
+  temperature?:    number;
+  top_p?:          number;
+  top_k?:          number;
+  stop_sequences?: string[];
+  stream?:         boolean;
+  tools?:          unknown[];
+  tool_choice?:    unknown;
+}
+
+interface OpenAIToolCall {
+  id:       string;
+  type:     'function';
+  function: { name: string; arguments: string };
+}
+
+interface OpenAIMessage {
+  role:          string;
+  content:       string | null;
+  tool_calls?:   OpenAIToolCall[];
+  tool_call_id?: string;
+}
+
 const log = {
   error: (msg: string, err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
@@ -38,7 +82,7 @@ const AWS_BEARER_TOKEN_BEDROCK = process.env.AWS_BEARER_TOKEN_BEDROCK;
  */
 export async function invokeBedrockModel(
   modelId: string,
-  reqBody: any,
+  reqBody: AnthropicRequestBody,
   explicitBedrockModelId?: string
 ): Promise<{ statusCode: number; body: string }> {
   // Native AWS Bedrock Runtime Client (PrivateLink).
@@ -52,7 +96,7 @@ export async function invokeBedrockModel(
       : 'us.anthropic.claude-haiku-4-5-20251001-v1:0'
   );
 
-  const bedrockPayload = {
+  const bedrockPayload: any = {
     anthropic_version: 'bedrock-2023-05-31',
     max_tokens: reqBody.max_tokens || 1024,
     messages: reqBody.messages,
@@ -62,6 +106,9 @@ export async function invokeBedrockModel(
     top_k: reqBody.top_k,
     stop_sequences: reqBody.stop_sequences
   };
+
+  if (reqBody.tools) bedrockPayload.tools = reqBody.tools;
+  if (reqBody.tool_choice) bedrockPayload.tool_choice = reqBody.tool_choice;
 
   try {
     const command = new InvokeModelCommand({
@@ -96,38 +143,65 @@ export async function invokeBedrockModel(
 /**
  * Translate Anthropic message structures to OpenAI/vLLM structures
  */
-export function translateAnthropicToOpenAI(reqBody: any, modelName: string): any {
+export function translateAnthropicToOpenAI(reqBody: AnthropicRequestBody, modelName: string): {
+  model: string; messages: OpenAIMessage[]; max_tokens: number; temperature: number; stream: boolean;
+} {
   const messages = reqBody.messages || [];
-  const openAIMessages = messages.map((m: any) => {
-    let content = '';
-    if (typeof m.content === 'string') {
-      content = m.content;
-    } else if (Array.isArray(m.content)) {
-      content = m.content
-        .filter((c: any) => c.type === 'text')
-        .map((c: any) => c.text)
-        .join('\n');
-    }
-    return {
-      role: m.role === 'assistant' ? 'assistant' : 'user',
-      content
-    };
-  });
+  const openAIMessages: OpenAIMessage[] = [];
 
-  // Inject system prompt if present
+  for (const m of messages) {
+    if (typeof m.content === 'string') {
+      openAIMessages.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content });
+      continue;
+    }
+
+    const blocks = Array.isArray(m.content) ? m.content : [];
+    const textBlocks      = blocks.filter(c => c.type === 'text');
+    const toolUseBlocks   = blocks.filter(c => c.type === 'tool_use');
+    const toolResultBlocks = blocks.filter(c => c.type === 'tool_result');
+
+    if (toolUseBlocks.length > 0) {
+      // Assistant message with tool calls
+      openAIMessages.push({
+        role: 'assistant',
+        content: textBlocks.map(c => c.text || '').join('\n') || null,
+        tool_calls: toolUseBlocks.map(c => ({
+          id:       c.id || '',
+          type:     'function' as const,
+          function: { name: c.name || '', arguments: JSON.stringify(c.input ?? {}) },
+        })),
+      });
+    } else if (toolResultBlocks.length > 0) {
+      // One OpenAI tool message per tool_result block
+      for (const block of toolResultBlocks) {
+        const resultContent = typeof block.content === 'string'
+          ? block.content
+          : Array.isArray(block.content)
+            ? (block.content as ContentBlock[]).filter(c => c.type === 'text').map(c => c.text || '').join('\n')
+            : '';
+        openAIMessages.push({ role: 'tool', content: resultContent, tool_call_id: block.tool_use_id || '' });
+      }
+      if (textBlocks.length > 0) {
+        openAIMessages.push({ role: 'user', content: textBlocks.map(c => c.text || '').join('\n') });
+      }
+    } else {
+      openAIMessages.push({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: textBlocks.map(c => c.text || '').join('\n'),
+      });
+    }
+  }
+
   if (reqBody.system) {
-    openAIMessages.unshift({
-      role: 'system',
-      content: reqBody.system
-    });
+    openAIMessages.unshift({ role: 'system', content: reqBody.system });
   }
 
   return {
-    model: modelName,
-    messages: openAIMessages,
-    max_tokens: reqBody.max_tokens || 1024,
+    model:       modelName,
+    messages:    openAIMessages,
+    max_tokens:  reqBody.max_tokens || 1024,
     temperature: reqBody.temperature || 0.7,
-    stream: reqBody.stream || false
+    stream:      reqBody.stream || false,
   };
 }
 
@@ -136,8 +210,8 @@ export function translateAnthropicToOpenAI(reqBody: any, modelName: string): any
  */
 export async function invokeVllmModel(
   modelId: string,
-  reqBody: any
-): Promise<{ statusCode: number; headers: Record<string, string>; body: any }> {
+  reqBody: AnthropicRequestBody
+): Promise<{ statusCode: number; headers: Record<string, string>; body: string }> {
   const baseModel = modelId.split('/')[1] || 'qwen-coder-32b';
 
   // EKS-hosted vLLM endpoint. Mantle OSS routing is handled by invokeMantleOssModel.
@@ -182,7 +256,7 @@ export async function invokeVllmModel(
  */
 export async function invokeMantleAnthropicModel(
   mantleModelId: string,
-  reqBody: any
+  reqBody: AnthropicRequestBody
 ): Promise<{ statusCode: number; body: string }> {
   if (!AWS_BEARER_TOKEN_BEDROCK) {
     return {
@@ -190,7 +264,7 @@ export async function invokeMantleAnthropicModel(
       body: JSON.stringify({ error: { type: 'api_error', message: 'AWS_BEARER_TOKEN_BEDROCK is not configured.' } }),
     };
   }
-  const payload = {
+  const payload: any = {
     model: mantleModelId,
     max_tokens: reqBody.max_tokens || 1024,
     messages: reqBody.messages,
@@ -200,6 +274,8 @@ export async function invokeMantleAnthropicModel(
     stop_sequences: reqBody.stop_sequences,
     stream: reqBody.stream || false,
   };
+  if (reqBody.tools) payload.tools = reqBody.tools;
+  if (reqBody.tool_choice) payload.tool_choice = reqBody.tool_choice;
   try {
     const res = await request(`${BEDROCK_MANTLE_URL}/v1/messages`, {
       method: 'POST',
@@ -228,7 +304,7 @@ export async function invokeMantleAnthropicModel(
  */
 export async function invokeMantleOssModel(
   mantleModelId: string,
-  reqBody: any
+  reqBody: AnthropicRequestBody
 ): Promise<{ statusCode: number; headers: Record<string, string>; body: string }> {
   if (!AWS_BEARER_TOKEN_BEDROCK) {
     return {

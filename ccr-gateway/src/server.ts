@@ -1,4 +1,4 @@
-import fastify from 'fastify';
+import fastify, { FastifyRequest, FastifyReply } from 'fastify';
 import { request } from 'undici';
 import { v4 as uuidv4 } from 'uuid';
 import * as dotenv from 'dotenv';
@@ -20,7 +20,8 @@ import {
 } from './db.js';
 import { UNIFIED_MODEL_REGISTRY } from './model_registry.js';
 import { checkVllmHealth, checkVpnHealth, invokeBedrockModel, invokeVllmModel, invokeMantleAnthropicModel, invokeMantleOssModel, translateOpenAIToAnthropic } from './aws_connectors.js';
-import { renderDashboard, renderCisoReport } from './dashboard.js';
+import { renderDashboard } from './dashboard.js';
+import { renderCisoReport } from './ciso_report.js';
 
 dotenv.config();
 
@@ -44,6 +45,10 @@ const REPO_PATH    = process.env.REPO_PATH || process.cwd();
 // route selection so real Ollama routing works once OLLAMA_URL is configured.
 const MOCK_LOCAL   = process.env.MOCK_LOCAL === 'true';
 
+// Subscription users: escalation routes back to api.anthropic.com (uses included quota, $0 marginal cost).
+// Never route escalations to Bedrock Sonnet — that double-bills on top of the subscription.
+const ESCALATION_FALLBACK_ROUTE = 'anthropic/native';
+
 // Token costs keyed by model/route ID — single source of truth, no magic numbers in handlers.
 const TOKEN_COSTS: Record<string, { input: number; output: number }> = {
   'claude-haiku-4-5':              { input: 0.0000008,  output: 0.000004  },
@@ -53,8 +58,9 @@ const TOKEN_COSTS: Record<string, { input: number; output: number }> = {
   'aws-hosted/deepseek-coder-v2':  { input: 0.00000014, output: 0.00000014 },
   'aws-hosted/qwen-coder-32b':     { input: 0.00000018, output: 0.00000018 },
   'aws-hosted/glm-coder-v2':       { input: 0.00000020, output: 0.00000020 },
+  // Native Anthropic subscription — $0 marginal (quota included in subscription)
+  'anthropic/native':              { input: 0,          output: 0           },
   'bedrock/claude-3-5-sonnet':     { input: 0.000003,   output: 0.000015  },
-  'bedrock/claude-sonnet-4-6':     { input: 0.000003,   output: 0.000015  },
   // Bedrock Mantle — Anthropic
   'mantle/claude-opus-4-8':        { input: 0.000015,   output: 0.000075  },
   'mantle/claude-sonnet-4-6':      { input: 0.000003,   output: 0.000015  },
@@ -135,6 +141,7 @@ interface RequestState {
   reason:        string;
   forced:        boolean;
   timestamp:     number;
+  chosenRoute:   string;
 }
 
 const REQUEST_STATE_MAX  = 10;
@@ -161,6 +168,7 @@ server.get('/admin/api/route', async () => {
     activeMode:        config.activeMode,
     lastRouteReason:   latest?.reason        ?? 'manual_user_override',
     lastRouteForced:   latest?.forced        ?? false,
+    lastChosenRoute:   latest?.chosenRoute   ?? config.activeRoute,
     lastCorrelationId: latest?.correlationId ?? null,
   };
 });
@@ -344,7 +352,8 @@ async function recordRequestTelemetry(params: TelemetryParams): Promise<void> {
   const baselineCosts = TOKEN_COSTS['claude-sonnet-4-5'] ?? DEFAULT_TOKEN_COST;
   const baselineCost  = (inputTokens * baselineCosts.input) + (outputTokens * baselineCosts.output);
   const actualCost    = computeActualCost(chosenRouteId, inputTokens, outputTokens);
-  const delta         = baselineCost - actualCost;
+  // Subscription routes ($0 marginal) shift cost from variable to fixed quota — not a real saving.
+  const delta         = chosenRouteId === 'anthropic/native' ? 0 : baselineCost - actualCost;
 
   await logSpendRecord(correlationId, inputTokens, outputTokens, actualCost, baselineCost, delta);
   await logTelemetryEvent({
@@ -365,29 +374,167 @@ async function recordRequestTelemetry(params: TelemetryParams): Promise<void> {
   });
 }
 
+// ── Request body interfaces ───────────────────────────────────────────────────
+
+interface AnthropicMessageBody {
+  model?:         string;
+  messages?:      Array<{ role: string; content: string | Array<{ type: string; text?: string }> }>;
+  system?:        string;
+  max_tokens?:    number;
+  temperature?:   number;
+  top_p?:         number;
+  top_k?:         number;
+  stop_sequences?: string[];
+  stream?:        boolean;
+  tools?:         unknown[];
+  tool_choice?:   unknown;
+}
+
+interface OpenAIChatBody {
+  model?:       string;
+  messages?:    Array<{ role: string; content: string }>;
+  max_tokens?:  number;
+  temperature?: number;
+  stream?:      boolean;
+}
+
+interface RouteBody {
+  activeRoute?: string;
+  activeMode?:  string;
+}
+
+interface FeedbackBody {
+  correlationId?: string;
+  outcome?:       string;
+  rating?:        string;
+  comments?:      string;
+}
+
+interface PolicyBody {
+  name?:         string;
+  pattern?:      string;
+  mode?:         string;
+  type?:         string;
+  description?:  string;
+  scope?:        string;
+  forcedRoute?:  string;
+}
+
 // ── Task classifier (#15) ─────────────────────────────────────────────────────
 
-const CHEAP_ROUTE_INDICATORS = [
-  'git commit', 'lint', 'add comments', 'explain', 'format',
-  'refactor', 'test', 'boilerplate', 'commit message',
-] as const;
+const QWEN_TASK_INDICATORS = [
+  'html', 'css', 'yaml', 'json', 'markdown', 'config', 'setup', 
+  'docker', 'bash', 'shell', 'bootstrap', 'yaml', 'yml', 'ci/cd', 'github actions'
+];
 
 function classifyTask(promptText: string): { suggestedRoute: string; reason: string } {
   const lower = promptText.toLowerCase();
-  for (const indicator of CHEAP_ROUTE_INDICATORS) {
-    if (lower.includes(indicator)) {
-      return {
-        suggestedRoute: 'aws-hosted/deepseek-coder-v2',
-        reason:         `cheap_indicator:${indicator}`,
-      };
+  
+  // Choose Qwen for DevOps, layout, boilerplate, and configs
+  const isQwenTask = QWEN_TASK_INDICATORS.some(kw => lower.includes(kw));
+  if (isQwenTask) {
+    return {
+      suggestedRoute: 'aws-hosted/qwen-coder-32b',
+      reason:         'cheap_route_qwen_coder_spec'
+    };
+  }
+
+  // Default cheap coding route (DeepSeek)
+  return { suggestedRoute: 'aws-hosted/deepseek-coder-v2', reason: 'standard_task_cheap_route' };
+}
+
+// ── Route selection helper ────────────────────────────────────────────────────
+
+interface SelectRouteParams {
+  activeRouteId:     string;
+  activeMode:        string;
+  promptText:        string;
+  currentRetryCount: number;
+  forcedRoute?:      string;
+  triggeredRules:    string[];
+}
+
+interface SelectRouteResult {
+  suggestedRouteId: string;
+  routingReason:    string;
+  finalRouteId:     string;
+  fallbackActive:   boolean;
+}
+
+function selectRoute(params: SelectRouteParams): SelectRouteResult {
+  const { activeRouteId, activeMode, promptText, currentRetryCount, forcedRoute, triggeredRules } = params;
+
+  let suggestedRouteId = activeRouteId;
+  let routingReason    = 'manual_user_override';
+
+  if (activeMode === 'suggested' || activeMode === 'auto') {
+    if (currentRetryCount >= 2) {
+      suggestedRouteId = ESCALATION_FALLBACK_ROUTE;
+      routingReason    = 'cheap_route_retry_escalation';
+    } else if (forcedRoute) {
+      suggestedRouteId = forcedRoute;
+      if (triggeredRules.includes('sensitive-workspace-forced-premium')) {
+        routingReason  = 'sensitive-workspace-forced-premium';
+      } else if (triggeredRules.includes('workspace-forced-local')) {
+        routingReason  = 'workspace_forced_policy';
+      } else {
+        routingReason  = 'policy_forced_local';
+      }
+    } else {
+      const classification = classifyTask(promptText);
+      suggestedRouteId = classification.suggestedRoute;
+      routingReason    = classification.reason;
+    }
+  } else {
+    // Manual mode — policy can still override.
+    if (forcedRoute) {
+      suggestedRouteId = forcedRoute;
+      if (triggeredRules.includes('sensitive-workspace-forced-premium')) {
+        routingReason  = 'sensitive-workspace-forced-premium';
+      } else if (triggeredRules.includes('workspace-forced-local')) {
+        routingReason  = 'workspace_forced_policy';
+      } else {
+        routingReason  = 'policy_forced_local';
+      }
     }
   }
-  return { suggestedRoute: 'bedrock/claude-3-5-sonnet', reason: 'heavy_reasoning_default' };
+
+  // Context ceiling & keyword escalations — only in suggested/auto mode.
+  if (activeMode === 'suggested' || activeMode === 'auto') {
+    if (promptText.length > 120000 && suggestedRouteId.startsWith('aws-hosted/')) {
+      suggestedRouteId = ESCALATION_FALLBACK_ROUTE;
+      routingReason    = 'context_window_ceiling_escalation';
+    }
+
+    const lowerPrompt      = promptText.toLowerCase();
+    const matchesSensitive = SENSITIVE_KEYWORDS.some(kw => lowerPrompt.includes(kw));
+    const matchesComplex   = COMPLEX_OPERATIONS.some(kw => lowerPrompt.includes(kw));
+
+    if (matchesSensitive && suggestedRouteId.startsWith('aws-hosted/')) {
+      suggestedRouteId = ESCALATION_FALLBACK_ROUTE;
+      routingReason    = 'sensitive_context_escalation';
+    } else if (matchesComplex && suggestedRouteId.startsWith('aws-hosted/')) {
+      suggestedRouteId = ESCALATION_FALLBACK_ROUTE;
+      routingReason    = 'complexity_task_escalation';
+    }
+  }
+
+  // EKS health fallback — redirect aws-hosted if vLLM is unhealthy.
+  let finalRouteId   = suggestedRouteId;
+  let fallbackActive = false;
+  if (finalRouteId.startsWith('aws-hosted/') && !isVllmHealthy) {
+    const entry      = UNIFIED_MODEL_REGISTRY.find(m => m.id === finalRouteId);
+    finalRouteId     = entry?.fallbackModelId || ESCALATION_FALLBACK_ROUTE;
+    routingReason    = 'oss_route_unhealthy_fallback';
+    fallbackActive   = true;
+  }
+
+  return { suggestedRouteId, routingReason, finalRouteId, fallbackActive };
 }
 
 // ── Primary Gateway: Anthropic Messages proxy ─────────────────────────────────
 
-const messagesHandler = async (req: any, reply: any) => {
+const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody }>, reply: FastifyReply) => {
   const correlationId = uuidv4();
   const startTime     = process.hrtime();
 
@@ -397,15 +544,7 @@ const messagesHandler = async (req: any, reply: any) => {
   const apiKey          = (req.headers['x-api-key'] || req.headers['authorization']) as string;
   const anthropicVersion = req.headers['anthropic-version'] as string;
 
-  if (!apiKey) {
-    server.log.warn({ correlationId }, 'Missing authentication header (x-api-key or authorization)');
-    reply.status(401).send({
-      error: { type: 'authentication_error', message: 'Missing authentication credentials (x-api-key or authorization header).' },
-    });
-    return;
-  }
-
-  const reqBody    = req.body as any;
+  const reqBody     = req.body;
   const targetModel = reqBody?.model || 'unknown';
 
   // Extract prompt text for task classification and retry detection.
@@ -459,69 +598,14 @@ const messagesHandler = async (req: any, reply: any) => {
     }
   }
 
-  let suggestedRouteId = activeRouteId;
-  let routingReason    = 'manual_user_override';
-
-  if (activeMode === 'suggested' || activeMode === 'auto') {
-    if (currentRetryCount >= 2) {
-      suggestedRouteId = 'bedrock/claude-3-5-sonnet';
-      routingReason    = 'cheap_route_retry_escalation';
-    } else if (policyResult.forcedRoute) {
-      suggestedRouteId = policyResult.forcedRoute;
-      if (policyResult.triggeredRules.includes('sensitive-workspace-forced-premium')) {
-        routingReason  = 'sensitive-workspace-forced-premium';
-      } else if (policyResult.triggeredRules.includes('workspace-forced-local')) {
-        routingReason  = 'workspace_forced_policy';
-      } else {
-        routingReason  = 'policy_forced_local';
-      }
-    } else {
-      const classification = classifyTask(promptText);
-      suggestedRouteId = classification.suggestedRoute;
-      routingReason    = classification.reason;
-    }
-  } else {
-    // Manual mode — policy can still override.
-    if (policyResult.forcedRoute) {
-      suggestedRouteId = policyResult.forcedRoute;
-      if (policyResult.triggeredRules.includes('sensitive-workspace-forced-premium')) {
-        routingReason  = 'sensitive-workspace-forced-premium';
-      } else if (policyResult.triggeredRules.includes('workspace-forced-local')) {
-        routingReason  = 'workspace_forced_policy';
-      } else {
-        routingReason  = 'policy_forced_local';
-      }
-    }
-  }
-
-  // 30k Context token ceiling check: Escalate prompts >30k tokens (~120k characters) to Bedrock Sonnet
-  if (promptText.length > 120000 && suggestedRouteId.startsWith('aws-hosted/')) {
-    suggestedRouteId = 'bedrock/claude-3-5-sonnet';
-    routingReason    = 'context_window_ceiling_escalation';
-  }
-
-  // Sensitive keywords & High-complexity tasks confidence gates
-  const lowerPrompt = promptText.toLowerCase();
-
-  const matchesSensitive = SENSITIVE_KEYWORDS.some(kw => lowerPrompt.includes(kw));
-  const matchesComplex   = COMPLEX_OPERATIONS.some(kw => lowerPrompt.includes(kw));
-
-  if (matchesSensitive && suggestedRouteId.startsWith('aws-hosted/')) {
-    suggestedRouteId = 'bedrock/claude-3-5-sonnet';
-    routingReason    = 'sensitive_context_escalation';
-  } else if (matchesComplex && suggestedRouteId.startsWith('aws-hosted/')) {
-    suggestedRouteId = 'bedrock/claude-3-5-sonnet';
-    routingReason    = 'complexity_task_escalation';
-  }
-
-  // EKS Health fallback check: redirect aws-hosted queries if vLLM server is unhealthy
-  let finalRouteId = suggestedRouteId;
-  let fallbackActive = false;
-  if (finalRouteId.startsWith('aws-hosted/') && !isVllmHealthy) {
-    finalRouteId = 'bedrock/claude-3-5-sonnet';
-    routingReason = 'oss_route_unhealthy_fallback';
-    fallbackActive = true;
-  }
+  const { suggestedRouteId, routingReason, finalRouteId, fallbackActive } = selectRoute({
+    activeRouteId,
+    activeMode,
+    promptText,
+    currentRetryCount,
+    forcedRoute:    policyResult.forcedRoute,
+    triggeredRules: policyResult.triggeredRules,
+  });
 
   const chosenRouteId = finalRouteId;
   const isOverride    = activeMode === 'suggested' && chosenRouteId !== activeRouteId;
@@ -532,6 +616,7 @@ const messagesHandler = async (req: any, reply: any) => {
     reason:    routingReason,
     forced:    routingReason.includes('forced') || routingReason.includes('escalation') || fallbackActive,
     timestamp: Date.now(),
+    chosenRoute: chosenRouteId,
   });
 
   if (policyResult.action === 'warn') {
@@ -658,8 +743,8 @@ const messagesHandler = async (req: any, reply: any) => {
     try {
       if (isAnthropicModel) {
         let res;
-        if (mantleModelId === 'anthropic.claude-sonnet-4-6') {
-          server.log.info({ correlationId }, 'Claude Sonnet 4.6 requested via Mantle. Falling back to native Bedrock SDK client.');
+        if (registryEntry?.useBedrockNative) {
+          server.log.info({ correlationId, mantleModelId }, 'useBedrockNative: routing via native Bedrock SDK client.');
           const sonnet46Entry = UNIFIED_MODEL_REGISTRY.find(m => m.id === 'bedrock/claude-sonnet-4-6');
           const bedrockRes = await invokeBedrockModel('bedrock/claude-sonnet-4-6', reqBody, sonnet46Entry?.bedrockModelId);
           res = {
@@ -722,7 +807,68 @@ const messagesHandler = async (req: any, reply: any) => {
     return;
   }
 
-  // 3c. Amazon Bedrock Runtime proxy connector
+  // 3c. Native Anthropic upstream — used for escalations on subscription plans.
+  // Forwards the original auth headers so the request uses the user's subscription quota.
+  // Cost = $0 marginal (covered by subscription). No AWS charges incurred.
+  if (chosenRouteId === 'anthropic/native') {
+    if (!apiKey) {
+      reply.status(401).send({ error: { type: 'authentication_error', message: 'No auth credentials available for native Anthropic escalation.' } });
+      return;
+    }
+    const forwardHeaders: Record<string, string> = {
+      'content-type':      'application/json',
+      'anthropic-version': (req.headers['anthropic-version'] as string) || '2023-06-01',
+    };
+    if (req.headers['x-api-key'])                                 forwardHeaders['x-api-key']         = req.headers['x-api-key'] as string;
+    else if (req.headers['authorization'])                        forwardHeaders['authorization']      = req.headers['authorization'] as string;
+    if (req.headers['anthropic-beta'])                            forwardHeaders['anthropic-beta']     = req.headers['anthropic-beta'] as string;
+    if (req.headers['anthropic-dangerous-direct-browser-access']) forwardHeaders['anthropic-dangerous-direct-browser-access'] = req.headers['anthropic-dangerous-direct-browser-access'] as string;
+
+    const nativeRes  = await request(`${UPSTREAM_URL}/v1/messages`, {
+      method: 'POST', headers: forwardHeaders, body: JSON.stringify(reqBody),
+    });
+    const nativeContentType = (nativeRes.headers['content-type'] as string) || 'application/json';
+    const isStreaming        = nativeContentType.includes('text/event-stream');
+
+    const endTime   = process.hrtime(startTime);
+    const latencyMs = Math.round(endTime[0] * 1000 + endTime[1] / 1000000);
+    await logRequestEvent(correlationId, targetModel, 'anthropic', nativeRes.statusCode, latencyMs);
+
+    if (isStreaming) {
+      let rawBuf = '';
+      nativeRes.body.on('data', (chunk) => { rawBuf += chunk.toString(); });
+      nativeRes.body.on('end', async () => {
+        const iMatch = rawBuf.match(/"input_tokens"\s*:\s*(\d+)/);
+        const oMatch = rawBuf.match(/"output_tokens"\s*:\s*(\d+)/);
+        const it = iMatch ? parseInt(iMatch[1], 10) : 0;
+        const ot = oMatch ? parseInt(oMatch[1], 10) : 0;
+        await recordRequestTelemetry({ correlationId, inputTokens: it, outputTokens: ot,
+          chosenRouteId, activeMode, suggestedRouteId, isOverride, promptLength: promptText.length, routingReason });
+        lastRequestCache = { timestamp: Date.now(), promptText, routeUsed: chosenRouteId,
+          retryCount: currentRetryCount, correlationId };
+      });
+    } else {
+      const bodyText = await nativeRes.body.text();
+      let it = 0, ot = 0;
+      try { const p = JSON.parse(bodyText); it = p.usage?.input_tokens || 0; ot = p.usage?.output_tokens || 0; } catch {}
+      await recordRequestTelemetry({ correlationId, inputTokens: it, outputTokens: ot,
+        chosenRouteId, activeMode, suggestedRouteId, isOverride, promptLength: promptText.length, routingReason });
+      lastRequestCache = { timestamp: Date.now(), promptText, routeUsed: chosenRouteId,
+        retryCount: currentRetryCount, correlationId };
+      reply.header('x-correlation-id', correlationId).header('x-ccr-chosen-route', chosenRouteId)
+           .header('x-ccr-reason', routingReason).header('content-type', nativeContentType);
+      reply.status(nativeRes.statusCode).send(bodyText);
+      return;
+    }
+
+    reply.header('x-correlation-id', correlationId).header('x-ccr-chosen-route', chosenRouteId)
+         .header('x-ccr-reason', routingReason).header('content-type', nativeContentType);
+    reply.status(nativeRes.statusCode);
+    reply.send(nativeRes.body);
+    return;
+  }
+
+  // 3d. Amazon Bedrock Runtime proxy connector
   if (chosenRouteId.startsWith('bedrock/')) {
     const bedrockEntry = UNIFIED_MODEL_REGISTRY.find(m => m.id === chosenRouteId);
     const bedrockResponse = await invokeBedrockModel(chosenRouteId, reqBody, bedrockEntry?.bedrockModelId);
@@ -777,6 +923,14 @@ const messagesHandler = async (req: any, reply: any) => {
   }
 
   // 4. Upstream proxy
+  if (!apiKey) {
+    server.log.warn({ correlationId }, 'Missing authentication header (x-api-key or authorization) for upstream public Anthropic API');
+    reply.status(401).send({
+      error: { type: 'authentication_error', message: 'Missing authentication credentials (x-api-key or authorization header) for upstream public Anthropic API.' },
+    });
+    return;
+  }
+
   try {
     const forwardHeaders: Record<string, string> = {
       'content-type':      'application/json',
@@ -883,31 +1037,31 @@ server.post('/v1/messages', messagesHandler);
 server.post('/anthropic/v1/messages', messagesHandler);
 
 // ── OpenAI Chat Completions Endpoint ──────────────────────────────────────────
-server.post('/v1/chat/completions', async (req, reply) => {
+server.post('/v1/chat/completions', async (req: FastifyRequest<{ Body: OpenAIChatBody }>, reply: FastifyReply) => {
   const correlationId = uuidv4();
   const startTime     = process.hrtime();
-  
+
   const apiKey = (req.headers['x-api-key'] || req.headers['authorization']) as string;
   if (!apiKey) {
     reply.status(401).send({ error: { message: 'Missing API Key.' } });
     return;
   }
 
-  const reqBody = req.body as any;
+  const reqBody     = req.body;
   const targetModel = reqBody.model || 'unknown';
 
   // Extract prompt text for policy checks and classification
   let promptText = '';
   if (reqBody.messages && Array.isArray(reqBody.messages)) {
-    promptText = reqBody.messages.map((m: any) => m.content).join('\n');
+    promptText = reqBody.messages.map(m => m.content).join('\n');
   }
 
   // 1. Policy check
-  const activeRules  = await getPolicies();
+  const activeRules     = await getPolicies();
   const requestRepoPath = req.headers['x-ccr-repo-path'] as string || REPO_PATH;
-  const policyResult = policyEngine.evaluateRequest(
+  const policyResult    = policyEngine.evaluateRequest(
     { messages: [{ role: 'user', content: promptText }] },
-    requestRepoPath, 
+    requestRepoPath,
     activeRules
   );
 
@@ -917,47 +1071,18 @@ server.post('/v1/chat/completions', async (req, reply) => {
   }
 
   // 2. Route selection
-  const routeConfig = await getRouteConfig();
+  const routeConfig   = await getRouteConfig();
   const activeRouteId = routeConfig.activeRoute;
-  const activeMode = routeConfig.activeMode;
+  const activeMode    = routeConfig.activeMode;
 
-  let suggestedRouteId = activeRouteId;
-  let routingReason = 'manual_user_override';
-
-  if (activeMode === 'suggested' || activeMode === 'auto') {
-    const classification = classifyTask(promptText);
-    suggestedRouteId = classification.suggestedRoute;
-    routingReason = classification.reason;
-  }
-
-  // Policy override check
-  if (policyResult.forcedRoute) {
-    suggestedRouteId = policyResult.forcedRoute;
-    routingReason = policyResult.triggeredRules.includes('sensitive-workspace-forced-premium')
-      ? 'sensitive-workspace-forced-premium' : 'policy_forced_local';
-  }
-
-  // Escalations for sensitive or complex queries
-  const lowerPrompt = promptText.toLowerCase();
-  const matchesSensitive = SENSITIVE_KEYWORDS.some(kw => lowerPrompt.includes(kw));
-  const matchesComplex   = COMPLEX_OPERATIONS.some(kw => lowerPrompt.includes(kw));
-
-  if (matchesSensitive && suggestedRouteId.startsWith('aws-hosted/')) {
-    suggestedRouteId = 'bedrock/claude-3-5-sonnet';
-    routingReason    = 'sensitive_context_escalation';
-  } else if (matchesComplex && suggestedRouteId.startsWith('aws-hosted/')) {
-    suggestedRouteId = 'bedrock/claude-3-5-sonnet';
-    routingReason    = 'complexity_task_escalation';
-  }
-
-  // EKS Health fallback check
-  let finalRouteId = suggestedRouteId;
-  let fallbackActive = false;
-  if (finalRouteId.startsWith('aws-hosted/') && !isVllmHealthy) {
-    finalRouteId = 'bedrock/claude-3-5-sonnet';
-    routingReason = 'oss_route_unhealthy_fallback';
-    fallbackActive = true;
-  }
+  const { suggestedRouteId, routingReason, finalRouteId, fallbackActive } = selectRoute({
+    activeRouteId,
+    activeMode,
+    promptText,
+    currentRetryCount: 0,
+    forcedRoute:    policyResult.forcedRoute,
+    triggeredRules: policyResult.triggeredRules,
+  });
 
   const chosenRouteId = finalRouteId;
   const isOverride    = activeMode === 'suggested' && chosenRouteId !== activeRouteId;
@@ -968,6 +1093,7 @@ server.post('/v1/chat/completions', async (req, reply) => {
     reason:    routingReason,
     forced:    routingReason.includes('forced') || routingReason.includes('escalation') || fallbackActive,
     timestamp: Date.now(),
+    chosenRoute: chosenRouteId,
   });
 
   // Mock mode for local testing
@@ -1033,7 +1159,9 @@ server.post('/v1/chat/completions', async (req, reply) => {
           chosenRouteId, activeMode, suggestedRouteId, isOverride,
           promptLength: promptText.length, routingReason,
         });
-      } catch {}
+      } catch (e: unknown) {
+        server.log.warn({ err: e, correlationId }, 'telemetry record failed (vllm path)');
+      }
     }
 
     reply.status(vllmResponse.statusCode).send(vllmResponse.body);
@@ -1042,10 +1170,11 @@ server.post('/v1/chat/completions', async (req, reply) => {
 
   if (chosenRouteId.startsWith('bedrock/')) {
     // Translate OpenAI request to Anthropic payload
-    const system = reqBody.messages.find((m: any) => m.role === 'system' || m.role === 'developer')?.content;
-    const anthropicMessages = reqBody.messages
-      .filter((m: any) => m.role === 'user' || m.role === 'assistant')
-      .map((m: any) => ({ role: m.role, content: m.content }));
+    const oaiMsgs = reqBody.messages ?? [];
+    const system = oaiMsgs.find((m) => m.role === 'system' || m.role === 'developer')?.content;
+    const anthropicMessages = oaiMsgs
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .map((m) => ({ role: m.role, content: m.content }));
 
     const bedrockEntryOai = UNIFIED_MODEL_REGISTRY.find(m => m.id === chosenRouteId);
     const bedrockResponse = await invokeBedrockModel(chosenRouteId, {
@@ -1112,14 +1241,15 @@ server.post('/v1/chat/completions', async (req, reply) => {
 
     if (isAnthropicModel) {
       // Anthropic Mantle models expect Anthropic format — translate OpenAI request first
-      const system = reqBody.messages.find((m: any) => m.role === 'system' || m.role === 'developer')?.content;
-      const anthropicMessages = reqBody.messages
-        .filter((m: any) => m.role === 'user' || m.role === 'assistant')
-        .map((m: any) => ({ role: m.role, content: m.content }));
+      const msgs = reqBody.messages ?? [];
+      const system = msgs.find((m) => m.role === 'system' || m.role === 'developer')?.content;
+      const anthropicMessages = msgs
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .map((m) => ({ role: m.role, content: m.content }));
 
       let res;
-      if (mantleModelId === 'anthropic.claude-sonnet-4-6') {
-        server.log.info({ correlationId }, 'Claude Sonnet 4.6 requested via Mantle completions. Falling back to native Bedrock SDK client.');
+      if (registryEntry?.useBedrockNative) {
+        server.log.info({ correlationId, mantleModelId }, 'useBedrockNative: routing via native Bedrock SDK client (completions).');
         const sonnet46Entry = UNIFIED_MODEL_REGISTRY.find(m => m.id === 'bedrock/claude-sonnet-4-6');
         const bedrockRes = await invokeBedrockModel('bedrock/claude-sonnet-4-6', {
           messages: anthropicMessages,
@@ -1193,7 +1323,9 @@ server.post('/v1/chat/completions', async (req, reply) => {
           chosenRouteId, activeMode, suggestedRouteId, isOverride,
           promptLength: promptText.length, routingReason,
         });
-      } catch {}
+      } catch (e: unknown) {
+        server.log.warn({ err: e, correlationId }, 'telemetry record failed (mantle-oss path)');
+      }
     }
     reply.status(res.statusCode).header('content-type', res.headers['content-type'] || 'application/json').send(res.body);
     return;
@@ -1229,6 +1361,10 @@ const start = async () => {
     await initDatabase();
     // Warn at startup if any default policy rule references an unknown model ID (#8).
     policyEngine.validateForcedRoutes(VALID_ROUTE_IDS);
+
+    // Perform initial health checks immediately at startup to avoid 10s delay window
+    isVllmHealthy = await checkVllmHealth().catch(() => false);
+    isVpnHealthy  = await checkVpnHealth().catch(() => false);
 
     // EKS vLLM and VPN health ping loops — update module vars only, never mutate registry objects.
     setInterval(async () => {

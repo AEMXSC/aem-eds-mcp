@@ -2,7 +2,7 @@ export interface ModelRegistryEntry {
   id: string;
   name: string;
   provider: string;
-  hosting: 'aws-hosted' | 'bedrock' | 'mantle' | 'internal' | 'developer-local';
+  hosting: 'aws-hosted' | 'bedrock' | 'mantle' | 'internal' | 'developer-local' | 'anthropic';
   cost: string;
   supportedModes: string[];
   policyTags: string[];
@@ -13,6 +13,12 @@ export interface ModelRegistryEntry {
   mantleModelId?: string;
   /** Native Bedrock model ARN/ID — only set for hosting === 'bedrock'. */
   bedrockModelId?: string;
+  /** Custom fallback model ID (e.g. cloud fallback for unhealthy local models). */
+  fallbackModelId?: string;
+  /** If true, shown in the IDE ⭐ Top Picks section for this user's workload. */
+  recommended?: boolean;
+  /** When true, route through the native Bedrock SDK client instead of Mantle HTTP API. */
+  useBedrockNative?: boolean;
 }
 
 export const UNIFIED_MODEL_REGISTRY: ModelRegistryEntry[] = [
@@ -29,6 +35,7 @@ export const UNIFIED_MODEL_REGISTRY: ModelRegistryEntry[] = [
     availabilityStatus: 'online',
     aws_region: 'us-west-2',
     health: 'healthy',
+    fallbackModelId: 'mantle/qwen3-coder-next',
   },
   {
     id: 'aws-hosted/deepseek-coder-v2',
@@ -41,6 +48,8 @@ export const UNIFIED_MODEL_REGISTRY: ModelRegistryEntry[] = [
     availabilityStatus: 'online',
     aws_region: 'us-west-2',
     health: 'healthy',
+    fallbackModelId: 'mantle/deepseek-v3.2',
+    recommended: true, // #2: Best latency for quick TS/Node edits, EKS-hosted
   },
   {
     id: 'aws-hosted/glm-coder-v2',
@@ -53,6 +62,26 @@ export const UNIFIED_MODEL_REGISTRY: ModelRegistryEntry[] = [
     availabilityStatus: 'online',
     aws_region: 'us-west-2',
     health: 'healthy',
+    fallbackModelId: 'mantle/deepseek-v3.2',
+  },
+
+  // ── Native Anthropic — subscription passthrough (api.anthropic.com) ──────────
+  // These routes forward the original request to api.anthropic.com using the
+  // client's own credentials. Billed against the subscription — $0 marginal cost.
+  // The 'model' field in the request body is preserved, so Claude Code controls
+  // which Claude model runs (Sonnet, Opus, Haiku, etc.).
+  {
+    id: 'anthropic/native',
+    name: 'Claude (Subscription)',
+    provider: 'anthropic',
+    hosting: 'anthropic',
+    cost: '$0.00 marginal (subscription quota)',
+    supportedModes: ['manual', 'suggested', 'auto'],
+    policyTags: ['frontier', 'high-reasoning', 'subscription'],
+    availabilityStatus: 'online',
+    aws_region: 'n/a',
+    health: 'healthy',
+    recommended: true, // #5: Complex architecture, debugging sessions needing full Claude
   },
 
   // ── Bedrock native SDK (PrivateLink) ─────────────────────────────────────────
@@ -67,7 +96,7 @@ export const UNIFIED_MODEL_REGISTRY: ModelRegistryEntry[] = [
     availabilityStatus: 'online',
     aws_region: 'us-east-1',
     health: 'healthy',
-    bedrockModelId: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+    bedrockModelId: 'us.anthropic.claude-sonnet-4-6',
   },
   {
     id: 'bedrock/claude-sonnet-4-6',
@@ -125,6 +154,7 @@ export const UNIFIED_MODEL_REGISTRY: ModelRegistryEntry[] = [
     aws_region: 'us-east-1',
     health: 'unhealthy',
     mantleModelId: 'anthropic.claude-sonnet-4-6',
+    useBedrockNative: true,
   },
   {
     id: 'mantle/claude-haiku-4-5',
@@ -179,6 +209,7 @@ export const UNIFIED_MODEL_REGISTRY: ModelRegistryEntry[] = [
     aws_region: 'us-east-1',
     health: 'healthy',
     mantleModelId: 'mistral.devstral-2-123b',
+    recommended: true, // #3: Mistral code model — strong on TS/JS refactors & AEM blocks
   },
   {
     id: 'mantle/kimi-k2-thinking',
@@ -192,6 +223,7 @@ export const UNIFIED_MODEL_REGISTRY: ModelRegistryEntry[] = [
     aws_region: 'us-east-1',
     health: 'healthy',
     mantleModelId: 'moonshotai.kimi-k2-thinking',
+    recommended: true, // #5 OSS: Reasoning-heavy tasks (debugging, architecture) — 33% cheaper than Claude
   },
   {
     id: 'mantle/mistral-large-3-675b',
@@ -250,26 +282,28 @@ export const UNIFIED_MODEL_REGISTRY: ModelRegistryEntry[] = [
     name: 'Qwen3 Coder (Mantle)',
     provider: 'alibaba',
     hosting: 'mantle',
-    cost: '$0.00008 / 1k tokens (Est. Savings: 95%)',
+    cost: '$0.00008 / 1k tokens (Est. Savings: 97%)',
     supportedModes: ['manual', 'suggested', 'auto'],
     policyTags: ['low-cost', 'code-only', 'oss', 'mantle'],
     availabilityStatus: 'online',
     aws_region: 'us-east-1',
     health: 'healthy',
     mantleModelId: 'qwen.qwen3-coder-next',
+    recommended: true, // #1: Cheapest coding model, 97% savings — ideal for TS/AEM/EDS iteration
   },
   {
     id: 'mantle/deepseek-v3.2',
     name: 'DeepSeek V3.2 (Mantle)',
     provider: 'deepseek',
     hosting: 'mantle',
-    cost: '$0.00010 / 1k tokens (Est. Savings: 92%)',
+    cost: '$0.00010 / 1k tokens (Est. Savings: 97%)',
     supportedModes: ['manual', 'suggested', 'auto'],
     policyTags: ['low-cost', 'code-only', 'oss', 'mantle'],
     availabilityStatus: 'online',
     aws_region: 'us-east-1',
     health: 'healthy',
     mantleModelId: 'deepseek.v3.2',
+    recommended: true, // #4: Best cost/quality balance — proven fallback, excellent at reasoning
   },
 
   // ── Internal / VPN ───────────────────────────────────────────────────────────
