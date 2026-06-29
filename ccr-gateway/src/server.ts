@@ -352,8 +352,8 @@ async function recordRequestTelemetry(params: TelemetryParams): Promise<void> {
   const baselineCosts = TOKEN_COSTS['claude-sonnet-4-5'] ?? DEFAULT_TOKEN_COST;
   const baselineCost  = (inputTokens * baselineCosts.input) + (outputTokens * baselineCosts.output);
   const actualCost    = computeActualCost(chosenRouteId, inputTokens, outputTokens);
-  // Subscription routes ($0 marginal) shift cost from variable to fixed quota — not a real saving.
-  const delta         = chosenRouteId === 'anthropic/native' ? 0 : baselineCost - actualCost;
+  // Subscription routes have $0 marginal cost; delta shows what the equivalent paid model would cost (comparative only).
+  const delta         = baselineCost - actualCost;
 
   await logSpendRecord(correlationId, inputTokens, outputTokens, actualCost, baselineCost, delta);
   await logTelemetryEvent({
