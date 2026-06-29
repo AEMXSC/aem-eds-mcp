@@ -156,10 +156,31 @@ export async function renderDashboard(vllmHealthy = true, vpnHealthy = true): Pr
   });
   const totalSavings = Math.max(0, totalBaselineCost - totalActualCost);
 
-  // Generate route-lane metrics rows
+  // Extract subscription baseline metrics (rendered as reference card, not a table row)
+  const subMetrics  = routeMetrics['anthropic/native'];
+  const subApiEquiv = subMetrics ? `$${subMetrics.baselineCost.toFixed(4)}` : '$0.0000';
+  const subTasks    = subMetrics?.totalTasks ?? 0;
+  const subLatency  = subMetrics?.avgLatency ?? 0;
+
+  const baselineCardHtml = `
+    <div class="baseline-card">
+      <div class="baseline-label">YOUR BASELINE</div>
+      <div class="baseline-name">Claude Max Subscription</div>
+      <div class="baseline-stats">
+        <span>${subTasks} requests</span>
+        <span class="baseline-divider">·</span>
+        <span>API equivalent: <strong>${subApiEquiv}</strong></span>
+        <span class="baseline-divider">·</span>
+        <span>${subLatency}ms avg</span>
+      </div>
+      <div class="baseline-note">Optimized routes below are compared against Sonnet 4.5 pay-per-use pricing</div>
+    </div>`;
+
+  // Generate route-lane metrics rows (subscription excluded — shown as baseline card above)
   const analyticsRows = Object.keys(routeMetrics)
     .sort((a, b) => routeMetrics[b].totalTasks - routeMetrics[a].totalTasks)
     .map((id, index) => {
+      if (id === 'anthropic/native') return '';
       const m = routeMetrics[id];
       const keepRate = m.feedbackCount > 0 ? Math.round((m.keptCount / m.feedbackCount) * 100) : 0;
       const reworkRate = m.feedbackCount > 0 ? Math.round((m.reworkedCount / m.feedbackCount) * 100) : 0;
@@ -535,6 +556,53 @@ export async function renderDashboard(vllmHealthy = true, vpnHealthy = true): Pr
           display: flex;
           justify-content: space-between;
           align-items: center;
+        }
+
+        .baseline-card {
+          background: rgba(20, 115, 230, 0.06);
+          border: 1px solid rgba(20, 115, 230, 0.25);
+          border-top: 2px solid var(--spectrum-accent-blue);
+          border-radius: 6px;
+          padding: 14px 20px;
+          margin-bottom: 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        .baseline-label {
+          font-size: 10px;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          color: var(--spectrum-accent-blue);
+          text-transform: uppercase;
+        }
+        .baseline-name {
+          font-size: 15px;
+          font-weight: 600;
+          color: var(--text-primary);
+        }
+        .baseline-stats {
+          display: flex;
+          gap: 10px;
+          font-size: 13px;
+          color: var(--text-secondary);
+          flex-wrap: wrap;
+          align-items: center;
+        }
+        .baseline-stats strong { color: var(--spectrum-accent-green); }
+        .baseline-divider { color: var(--text-disabled); }
+        .baseline-note {
+          font-size: 11px;
+          color: var(--text-disabled);
+          margin-top: 2px;
+        }
+        .optimized-routes-label {
+          font-size: 12px;
+          font-weight: 600;
+          color: var(--text-secondary);
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          margin: 0 0 10px 0;
         }
 
         /* Spectrum Forms & Filters */
@@ -1094,6 +1162,8 @@ export async function renderDashboard(vllmHealthy = true, vpnHealthy = true): Pr
           <!-- ROUTE ANALYTICS TABLE -->
           <div class="panel-card" style="margin-bottom: 2rem;">
             <div class="panel-title">Per-Lane Economics & Developer Trust Metrics</div>
+            ${baselineCardHtml}
+            <div class="optimized-routes-label">Optimized Routes</div>
             <div class="table-container">
               <table class="spectrum-table" style="width: 100%;">
                 <thead>
