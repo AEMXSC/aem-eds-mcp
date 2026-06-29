@@ -970,10 +970,14 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
       let rawStreamBuffer = '';
       upstreamResponse.body.on('data', (chunk) => { rawStreamBuffer += chunk.toString(); });
       upstreamResponse.body.on('end', async () => {
-        const inputMatch  = rawStreamBuffer.match(/"input_tokens"\s*:\s*(\d+)/);
-        const outputMatch = rawStreamBuffer.match(/"output_tokens"\s*:\s*(\d+)/);
-        const inputTokens  = inputMatch  ? parseInt(inputMatch[1],  10) : 0;
-        const outputTokens = outputMatch ? parseInt(outputMatch[1], 10) : 0;
+        // input_tokens: first match (message_start) is the real input count.
+        // output_tokens: LAST match (message_delta) is the cumulative final count;
+        //               first match (message_start) is always 1 and must be ignored.
+        const inputMatch   = rawStreamBuffer.match(/"input_tokens"\s*:\s*(\d+)/);
+        const outputMatches = [...rawStreamBuffer.matchAll(/"output_tokens"\s*:\s*(\d+)/g)];
+        const inputTokens  = inputMatch ? parseInt(inputMatch[1], 10) : 0;
+        const outputTokens = outputMatches.length > 0
+          ? parseInt(outputMatches[outputMatches.length - 1][1], 10) : 0;
 
         if (inputTokens > 0 || outputTokens > 0) {
           await recordRequestTelemetry({
