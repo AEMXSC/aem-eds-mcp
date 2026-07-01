@@ -1,31 +1,156 @@
 import fastify, { FastifyRequest, FastifyReply } from 'fastify';
 import { request } from 'undici';
 import { v4 as uuidv4 } from 'uuid';
+import { PassThrough, Transform } from 'stream';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
-import { PolicyEngine } from './policy.js';
+import { execSync } from 'child_process';
+
+function freePort(port: number): void {
+  try {
+    if (process.platform === 'win32') {
+      const result = execSync(`netstat -ano | findstr :${port}`, { encoding: 'utf8' });
+      const lines = result.split('\n').filter(l => l.includes('LISTENING'));
+      for (const line of lines) {
+        const pid = line.trim().split(/\s+/).pop();
+        if (pid && /^\d+$/.test(pid) && pid !== '0') {
+          execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' });
+        }
+      }
+    } else {
+      execSync(`fuser -k ${port}/tcp`, { stdio: 'ignore' });
+    }
+  } catch {
+    // No process found on port — safe to continue
+  }
+}
+
+/**
+ * Creates a safe, non-destructive Transform stream that taps into the stream data
+ * for background telemetry and logging without causing flowing-mode data loss.
+ */
+function createTelemetryTapStream(onEnd: (rawBuf: string) => void): Transform {
+  let rawBuf = '';
+  return new Transform({
+    transform(chunk, encoding, callback) {
+      const str = chunk.toString();
+      rawBuf += str;
+      callback(null, chunk);
+    },
+    flush(callback) {
+      try {
+        onEnd(rawBuf);
+      } catch (e) {
+        // Safe catch to ensure telemetry logging never blocks response stream
+      }
+      callback();
+    }
+  });
+}
+import { PolicyEngine, type PolicyRule, type PolicyMode, type PolicyType, type PolicyScope } from './policy.js';
 import {
   initDatabase,
   logRequestEvent,
   logPolicyHit,
   logSpendRecord,
   logFeedback,
+  logToolCallRecord,
+  logCacheSpendRecord,
   getPolicies,
   savePolicy,
   deletePolicy,
   incrementPolicyHits,
   getRouteConfig,
-  saveRouteConfig
+  saveRouteConfig,
+  clearAllData
 } from './db.js';
+import { detectLoop, recordToolCall, recordToolResult, recordEditTool, recordPrompt, cleanupSession, clearAllSessions, clearSession, updateToolResult, hashString, normalizeToolArgs } from './loop_detector.js';
+import { injectCacheHeaders, recordCacheRequest } from './context_cache.js';
+import type { AnthropicRequestBody } from './aws_connectors.js';
 import { UNIFIED_MODEL_REGISTRY } from './model_registry.js';
-import { checkVllmHealth, checkVpnHealth, invokeBedrockModel, invokeVllmModel, invokeMantleAnthropicModel, invokeMantleOssModel, translateOpenAIToAnthropic } from './aws_connectors.js';
+import { checkVllmHealth, checkVpnHealth, invokeBedrockModel, invokeVllmModel, invokeMantleAnthropicModel, invokeMantleOssModel, streamMantleOssToAnthropic, streamMantleAnthropicToClient, streamVllmToAnthropic, translateOpenAIToAnthropic, sanitizeAnthropicRequestBody } from './aws_connectors.js';
 import { renderDashboard } from './dashboard.js';
 import { renderCisoReport } from './ciso_report.js';
 
 dotenv.config();
 
+/**
+ * Anthropic requires cache_control TTL blocks to be ordered longest-first
+ * across the full request (tools → system → messages).
+ * A ttl='1h' block must never appear after a ttl='5m' block.
+ * This function strips cache_control from any block that would violate that rule.
+ */
+function sanitizeCacheControlOrder(body: any): void {
+  // Rank: higher number = longer TTL. Sequence must be non-increasing.
+  const TTL_RANK: Record<string, number> = { '1h': 2, '5m': 1, 'ephemeral': 0 };
+  let lowestRankSeen = Infinity;
+  let stripped = 0;
+  const ccSeen: any[] = [];
+
+  // Recursively walk any block — handles nested content inside tool_result blocks
+  function processBlock(block: any, path: string): void {
+    if (!block || typeof block !== 'object') return;
+
+    // Process cache_control on this block
+    const cc = block.cache_control;
+    if (cc) {
+      const ttl = cc.ttl ?? 'ephemeral';
+      const rank = TTL_RANK[ttl] ?? 0;
+      
+      ccSeen.push({ path, ttl, rank, action: rank > lowestRankSeen ? 'strip' : 'keep', currentLowest: lowestRankSeen });
+
+      if (rank > lowestRankSeen) {
+        delete block.cache_control;
+        stripped++;
+      } else {
+        lowestRankSeen = rank;
+      }
+    }
+
+    // Recurse into nested content arrays (e.g. tool_result.content)
+    if (Array.isArray(block.content)) {
+      for (let i = 0; i < block.content.length; i++) {
+        processBlock(block.content[i], `${path}.content[${i}]`);
+      }
+    }
+  }
+
+  // tools
+  if (Array.isArray(body?.tools)) {
+    for (let i = 0; i < body.tools.length; i++) {
+      processBlock(body.tools[i], `tools[${i}]`);
+    }
+  }
+  // system (array, string, or object)
+  if (Array.isArray(body?.system)) {
+    for (let i = 0; i < body.system.length; i++) {
+      processBlock(body.system[i], `system[${i}]`);
+    }
+  } else if (body?.system && typeof body.system === 'object') {
+    processBlock(body.system, 'system');
+  }
+  // messages
+  if (Array.isArray(body?.messages)) {
+    for (let i = 0; i < body.messages.length; i++) {
+      const msg = body.messages[i];
+      if (Array.isArray(msg.content)) {
+        for (let j = 0; j < msg.content.length; j++) {
+          processBlock(msg.content[j], `messages[${i}].content[${j}]`);
+        }
+      } else if (msg.content && typeof msg.content === 'object') {
+        processBlock(msg.content, `messages[${i}].content`);
+      }
+    }
+  }
+
+  if (stripped > 0) {
+    // Log stripped count for debugging (remove before commit)
+  }
+}
+
 const server = fastify({
+  bodyLimit: 104857600, // 100MB to accommodate large file context payloads
   logger: {
     transport: {
       target: 'pino-pretty',
@@ -75,6 +200,7 @@ const TOKEN_COSTS: Record<string, { input: number; output: number }> = {
   'mantle/kimi-k2-thinking':       { input: 0.000002,   output: 0.000010   },
   'mantle/mistral-large-3-675b':   { input: 0.000004,   output: 0.000012   },
   'mantle/deepseek-v3.2':          { input: 0.0000001,  output: 0.0000001  },
+  'mantle/glm-5.2-instruct':       { input: 0.0000003,  output: 0.0000003  },
 };
 const DEFAULT_TOKEN_COST   = { input: 0.000003, output: 0.000015 };
 const ZERO_COST_PREFIXES   = ['local/', 'internal/', 'developer-local/'] as const;
@@ -85,7 +211,7 @@ const COMPLEX_OPERATIONS   = ['migration', 'database design', 'architecture', 'r
 
 // Validated sets — used to reject bad inputs at the API boundary (#2, #16).
 const VALID_ROUTE_IDS  = new Set(UNIFIED_MODEL_REGISTRY.map(m => m.id));
-const VALID_MODES      = new Set(['manual', 'suggested', 'auto']);
+const VALID_MODES      = new Set(['manual', 'suggested', 'auto', 'bypass']);
 const VALID_OUTCOMES   = new Set(['kept', 'reworked', 'retried', 'abandoned']);
 const VALID_RATINGS    = new Set(['thumb_up', 'thumb_down']);
 const VALID_POLICY_MODES = ['monitor', 'warn', 'enforce', 'route'] as const;
@@ -112,7 +238,13 @@ server.addHook('preHandler', async (req, reply) => {
 
 // ── Health ────────────────────────────────────────────────────────────────────
 
-server.get('/health', async () => ({ status: 'healthy', timestamp: new Date().toISOString() }));
+const SERVER_START_TIME = Date.now();
+server.get('/health', async () => ({
+  status: 'healthy',
+  uptime_s: Math.floor((Date.now() - SERVER_START_TIME) / 1000),
+  version: '0.1.0',
+  timestamp: new Date().toISOString(),
+}));
 server.get('/ready',  async () => ({ status: 'ready' }));
 
 // ── Admin dashboard ───────────────────────────────────────────────────────────
@@ -158,6 +290,151 @@ function getLatestRequestState(): RequestState | null {
     : null;
 }
 
+function getSessionId(headers: Record<string, string | string[] | undefined>, correlationId: string): string {
+  const sessionId = headers['x-claude-code-session-id'];
+  if (typeof sessionId === 'string') {
+    return sessionId;
+  }
+  return correlationId;
+}
+
+/**
+ * Dynamically builds forward headers for upstream requests.
+ * Automatically forwards all headers starting with 'anthropic-' or standard auth headers.
+ * Normalizes keys to lowercase to ensure consistency.
+ */
+export function buildForwardHeaders(req: FastifyRequest, defaultVersion = '2023-06-01'): Record<string, string> {
+  const forwardHeaders: Record<string, string> = {
+    'content-type': 'application/json'
+  };
+
+  for (const key of Object.keys(req.headers)) {
+    const lowerKey = key.toLowerCase();
+    if (lowerKey.startsWith('anthropic-') || lowerKey === 'authorization' || lowerKey === 'x-api-key') {
+      const val = req.headers[key];
+      if (val !== undefined && val !== null) {
+        forwardHeaders[lowerKey] = Array.isArray(val) ? val.join(', ') : String(val);
+      }
+    }
+  }
+
+  if (!forwardHeaders['anthropic-version']) {
+    forwardHeaders['anthropic-version'] = defaultVersion;
+  }
+
+  return forwardHeaders;
+}
+
+// ── Loop Detection Integration ───────────────────────────────────────────────
+// Checks for infinite loops before processing requests
+
+export interface LoopCheckResult {
+  isLoop: boolean;
+  loopType: 'terminal' | 'pingpong' | 'stateless' | null;
+  confidence: number;
+  details: {
+    consecutiveCount: number;
+    threshold: number;
+    toolName?: string;
+    filePath?: string;
+    explanation: string;
+  };
+}
+
+/**
+ * Check if a request should be blocked due to loop detection
+ */
+export function checkForLoops(sessionId: string, body: any): LoopCheckResult | null {
+  // Extract tool calls from the request
+  const messages = body?.messages || [];
+  let currentTool: any = null;
+  let promptSnapshot = '';
+
+  // 1. Clear session records to rebuild them statelessly from the incoming request's message history.
+  clearSession(sessionId);
+
+  // 2. Iterate through messages in chronological order to populate the sliding window buffer.
+  for (const msg of messages) {
+    if (typeof msg.content === 'string') {
+      promptSnapshot += msg.content + '\n';
+    } else if (Array.isArray(msg.content)) {
+      for (const block of msg.content) {
+        if (block.type === 'text') {
+          promptSnapshot += block.text + '\n';
+        } else if (block.type === 'tool_use') {
+          const toolName = block.name || '';
+          const args = block.input || {};
+          const normalizedArgs = normalizeToolArgs(toolName, args);
+          const argsHash = hashString(normalizedArgs);
+
+          currentTool = {
+            tool_name: toolName,
+            args_hash: argsHash,
+            file_path: args.path || args.file_path || args.filepath || args.file,
+            line_range: args.line_range || (args.start_line !== undefined && args.end_line !== undefined ? `${args.start_line}-${args.end_line}` : undefined),
+            is_failure: false
+          };
+
+          // Record this tool call record in the buffer with block.id (which acts as tool_use_id)
+          recordToolCall(sessionId, {
+            id: block.id || `tool-${Date.now()}`,
+            session_id: sessionId,
+            timestamp: Date.now(),
+            tool_name: toolName,
+            args_hash: argsHash,
+            args_normalized: normalizedArgs,
+            file_path: currentTool.file_path,
+            line_range: currentTool.line_range
+          });
+
+          promptSnapshot += `tool_use:${toolName}:${JSON.stringify(args)}\n`;
+        } else if (block.type === 'tool_result') {
+          const toolUseId = block.tool_use_id || '';
+          const isFailure = block.is_error === true || block.status === 'error';
+          const status: 'success' | 'failure' = isFailure ? 'failure' : 'success';
+
+          updateToolResult(sessionId, toolUseId, status);
+
+          promptSnapshot += `tool_result:${toolUseId}:${block.status || (isFailure ? 'error' : 'success')}:${JSON.stringify(block.content)}\n`;
+        }
+      }
+    }
+  }
+
+  if (!currentTool) {
+    // No tool calls in this request, check for stateless repetition
+    if (promptSnapshot.length > 100) {
+      const result = detectLoop(sessionId, {
+        tool_name: 'prompt',
+        args_hash: '',
+        file_path: undefined,
+        line_range: undefined,
+        is_failure: false
+      }, promptSnapshot);
+      return result;
+    }
+    return null;
+  }
+
+  // Check for loop
+  const result = detectLoop(sessionId, currentTool, promptSnapshot);
+  return result;
+}
+
+/**
+ * Record tool call results for loop detection
+ */
+function recordToolCallResult(sessionId: string, toolName: string, args: any, status: 'success' | 'failure'): void {
+  recordToolResult(sessionId, toolName, args, status);
+}
+
+/**
+ * Record edit tool calls for ping-pong detection
+ */
+function recordEditToolCall(sessionId: string, filePath: string, lineRange?: string): void {
+  recordEditTool(sessionId, filePath, lineRange);
+}
+
 // ── Route config ──────────────────────────────────────────────────────────────
 
 server.get('/admin/api/route', async () => {
@@ -175,7 +452,7 @@ server.get('/admin/api/route', async () => {
 
 // Validates both fields before writing to DB (#2).
 server.post('/admin/api/route', async (req, reply) => {
-  const body = req.body as any;
+  const body = req.body as RouteRequestBody;
   if (body.activeMode !== undefined && !VALID_MODES.has(body.activeMode)) {
     reply.status(400).send({ error: `Invalid activeMode. Valid values: ${[...VALID_MODES].join(', ')}` });
     return;
@@ -188,12 +465,26 @@ server.post('/admin/api/route', async (req, reply) => {
   return { success: true };
 });
 
+server.post('/admin/api/reset', async (req, reply) => {
+  try {
+    await clearAllData();
+    clearAllSessions();
+    // Also clear the telemetry file
+    const telemetryFile = path.join(process.cwd(), 'ccr_telemetry.json');
+    await fs.promises.writeFile(telemetryFile, JSON.stringify([], null, 2), 'utf8');
+    return { success: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    reply.status(500).send({ error: message });
+  }
+});
+
 // ── Feedback (#1, #16) ────────────────────────────────────────────────────────
 // Moved from read-modify-write on ccr_telemetry.json (race condition) to an
 // append-only DB write. Inputs validated against known outcome/rating sets.
 
 server.post('/admin/api/feedback', async (req, reply) => {
-  const body = req.body as any;
+  const body = req.body as FeedbackRequestBody;
   if (!body.correlationId || !body.outcome || !body.rating) {
     reply.status(400).send({ error: 'Missing required fields: correlationId, outcome, rating' });
     return;
@@ -209,8 +500,9 @@ server.post('/admin/api/feedback', async (req, reply) => {
   try {
     await logFeedback(body.correlationId, body.outcome, body.rating, body.comments || '');
     return { success: true };
-  } catch (err: any) {
-    reply.status(500).send({ error: err.message });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    reply.status(500).send({ error: message });
   }
 });
 
@@ -219,7 +511,7 @@ server.post('/admin/api/feedback', async (req, reply) => {
 server.get('/admin/api/policies', async () => getPolicies());
 
 server.post('/admin/api/policies', async (req, reply) => {
-  const body = req.body as any;
+  const body = req.body as PolicyRequestBody;
   if (!body.name || !body.pattern || !body.mode || !body.type) {
     reply.status(400).send({ error: 'Missing required fields (name, pattern, mode, type)' });
     return;
@@ -251,8 +543,8 @@ server.post('/admin/api/policies', async (req, reply) => {
 });
 
 server.put('/admin/api/policies/:id', async (req, reply) => {
-  const { id } = req.params as any;
-  const body = req.body as any;
+  const { id } = req.params as { id: string };
+  const body = req.body as PolicyRequestBody;
   const existingRules = await getPolicies();
   const rule = existingRules.find(r => r.id === id);
   if (!rule) {
@@ -271,7 +563,7 @@ server.put('/admin/api/policies/:id', async (req, reply) => {
     reply.status(400).send({ error: `Unknown forcedRoute "${body.forcedRoute}". See /admin/api/registry for valid IDs.` });
     return;
   }
-  const updatedRule = {
+  const updatedRule: PolicyRule = {
     ...rule,
     name:        body.name        !== undefined ? body.name        : rule.name,
     pattern:     body.pattern     !== undefined ? body.pattern     : rule.pattern,
@@ -285,7 +577,7 @@ server.put('/admin/api/policies/:id', async (req, reply) => {
 });
 
 server.delete('/admin/api/policies/:id', async (req, reply) => {
-  const { id } = req.params as any;
+  const { id } = req.params as { id: string };
   await deletePolicy(id);
   return { success: true };
 });
@@ -343,11 +635,12 @@ interface TelemetryParams {
   isOverride:      boolean;
   promptLength:    number;
   routingReason:   string;
+  cachedTokens?:   number;
 }
 
 async function recordRequestTelemetry(params: TelemetryParams): Promise<void> {
   const { correlationId, inputTokens, outputTokens, chosenRouteId,
-          activeMode, suggestedRouteId, isOverride, promptLength, routingReason } = params;
+          activeMode, suggestedRouteId, isOverride, promptLength, routingReason, cachedTokens = 0 } = params;
 
   const baselineCosts = TOKEN_COSTS['claude-sonnet-4-5'] ?? DEFAULT_TOKEN_COST;
   const baselineCost  = (inputTokens * baselineCosts.input) + (outputTokens * baselineCosts.output);
@@ -356,6 +649,7 @@ async function recordRequestTelemetry(params: TelemetryParams): Promise<void> {
   const delta         = baselineCost - actualCost;
 
   await logSpendRecord(correlationId, inputTokens, outputTokens, actualCost, baselineCost, delta);
+  await logCacheSpendRecord(correlationId, inputTokens, cachedTokens, actualCost, baselineCost, delta);
   await logTelemetryEvent({
     eventId:        uuidv4(),
     correlationId,
@@ -371,24 +665,14 @@ async function recordRequestTelemetry(params: TelemetryParams): Promise<void> {
     delta,
     promptLength,
     reason:         routingReason,
+    cachedTokens,
   });
 }
 
 // ── Request body interfaces ───────────────────────────────────────────────────
 
-interface AnthropicMessageBody {
-  model?:         string;
-  messages?:      Array<{ role: string; content: string | Array<{ type: string; text?: string }> }>;
-  system?:        string;
-  max_tokens?:    number;
-  temperature?:   number;
-  top_p?:         number;
-  top_k?:         number;
-  stop_sequences?: string[];
-  stream?:        boolean;
-  tools?:         unknown[];
-  tool_choice?:   unknown;
-}
+// Type alias for backward compatibility
+type AnthropicMessageBody = { model?: string; messages?: unknown[]; [key: string]: unknown };
 
 interface OpenAIChatBody {
   model?:       string;
@@ -410,14 +694,27 @@ interface FeedbackBody {
   comments?:      string;
 }
 
-interface PolicyBody {
-  name?:         string;
-  pattern?:      string;
-  mode?:         string;
-  type?:         string;
-  description?:  string;
-  scope?:        string;
-  forcedRoute?:  string;
+interface RouteRequestBody {
+  activeRoute?: string;
+  activeMode?:  string;
+}
+
+interface FeedbackRequestBody {
+  correlationId?: string;
+  outcome?:       string;
+  rating?:        string;
+  comments?:      string;
+}
+
+
+interface PolicyRequestBody {
+  name:         string;
+  pattern:      string;
+  mode:         PolicyMode;
+  type:         PolicyType;
+  description?: string;
+  scope?:       PolicyScope;
+  forcedRoute?: string;
 }
 
 // ── Task classifier (#15) ─────────────────────────────────────────────────────
@@ -501,7 +798,7 @@ function selectRoute(params: SelectRouteParams): SelectRouteResult {
 
   // Context ceiling & keyword escalations — only in suggested/auto mode.
   if (activeMode === 'suggested' || activeMode === 'auto') {
-    if (promptText.length > 120000 && suggestedRouteId.startsWith('aws-hosted/')) {
+    if (promptText.length > 120000 && (suggestedRouteId.startsWith('aws-hosted/') || suggestedRouteId.startsWith('mantle/'))) {
       suggestedRouteId = ESCALATION_FALLBACK_ROUTE;
       routingReason    = 'context_window_ceiling_escalation';
     }
@@ -534,7 +831,7 @@ function selectRoute(params: SelectRouteParams): SelectRouteResult {
 
 // ── Primary Gateway: Anthropic Messages proxy ─────────────────────────────────
 
-const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody }>, reply: FastifyReply) => {
+const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicRequestBody }>, reply: FastifyReply) => {
   const correlationId = uuidv4();
   const startTime     = process.hrtime();
 
@@ -544,8 +841,76 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
   const apiKey          = (req.headers['x-api-key'] || req.headers['authorization']) as string;
   const anthropicVersion = req.headers['anthropic-version'] as string;
 
-  const reqBody     = req.body;
+  const reqBody     = sanitizeAnthropicRequestBody(req.body as AnthropicRequestBody);
   const targetModel = reqBody?.model || 'unknown';
+
+  // 1a. Transparent Passthrough Bypass Mode
+  const ccrConfig = await getRouteConfig();
+  if (ccrConfig.activeMode === 'bypass') {
+    if (!apiKey) {
+      reply.status(401).send({ error: { type: 'authentication_error', message: 'Missing auth credentials (x-api-key or authorization header) for upstream bypass.' } });
+      return;
+    }
+
+    const forwardHeaders = buildForwardHeaders(req, anthropicVersion);
+    const nativeRes = await request(`${UPSTREAM_URL}/v1/messages`, {
+      method: 'POST',
+      headers: forwardHeaders,
+      body: JSON.stringify(reqBody),
+    });
+
+    const nativeContentType = (nativeRes.headers['content-type'] as string) || 'application/json';
+    const isStreaming = nativeContentType.includes('text/event-stream');
+
+    reply.header('x-correlation-id', correlationId);
+    reply.header('x-ccr-chosen-route', 'anthropic/native');
+    reply.header('x-ccr-reason', 'bypass_mode_active');
+    reply.header('content-type', nativeContentType);
+    reply.status(nativeRes.statusCode);
+
+    if (isStreaming) {
+      reply.hijack();
+      reply.raw.writeHead(nativeRes.statusCode, {
+        'content-type': nativeContentType,
+        'x-correlation-id': correlationId,
+        'x-ccr-chosen-route': 'anthropic/native',
+        'x-ccr-reason': 'bypass_mode_active',
+      });
+
+      const tapStream = createTelemetryTapStream(async (rawBuf) => {
+        const iMatch = rawBuf.match(/"input_tokens"\s*:\s*(\d+)/);
+        const oMatch = rawBuf.match(/"output_tokens"\s*:\s*(\d+)/);
+        const it = iMatch ? parseInt(iMatch[1], 10) : 0;
+        const ot = oMatch ? parseInt(oMatch[1], 10) : 0;
+        await recordRequestTelemetry({
+          correlationId, inputTokens: it, outputTokens: ot, chosenRouteId: 'anthropic/native',
+          activeMode: 'bypass', suggestedRouteId: 'anthropic/native', isOverride: false,
+          promptLength: 0, routingReason: 'bypass_mode_active'
+        });
+      });
+      tapStream.on('end', () => {
+        const endTime   = process.hrtime(startTime);
+        const latencyMs = Math.round(endTime[0] * 1000 + endTime[1] / 1000000);
+        server.log.info({ correlationId, status: nativeRes.statusCode, latencyMs, streaming: true }, 'request_completed');
+      });
+      nativeRes.body.pipe(tapStream).pipe(reply.raw);
+    } else {
+      const bodyText = await nativeRes.body.text();
+      let it = 0, ot = 0;
+      try {
+        const p = JSON.parse(bodyText);
+        it = p.usage?.input_tokens || 0;
+        ot = p.usage?.output_tokens || 0;
+      } catch {}
+      await recordRequestTelemetry({
+        correlationId, inputTokens: it, outputTokens: ot, chosenRouteId: 'anthropic/native',
+        activeMode: 'bypass', suggestedRouteId: 'anthropic/native', isOverride: false,
+        promptLength: 0, routingReason: 'bypass_mode_active'
+      });
+      reply.send(bodyText);
+    }
+    return;
+  }
 
   // Extract prompt text for task classification and retry detection.
   let promptText = '';
@@ -561,7 +926,72 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
     }
   }
 
-  // 1. Policy evaluation
+  // 1. Loop detection check (anti-infinite-loop)
+  const sessionId = getSessionId(req.headers, correlationId);
+  const loopCheck = checkForLoops(sessionId, reqBody);
+
+  if (loopCheck?.isLoop) {
+    const endTime   = process.hrtime(startTime);
+    const latencyMs = Math.round(endTime[0] * 1000 + endTime[1] / 1000000);
+    server.log.warn({ correlationId, sessionId, loopCheck, latencyMs },
+      `Request BLOCKED - Loop detected: ${loopCheck.details.explanation}`);
+
+    // Log policy hit for loop detection
+    await logPolicyHit(correlationId, 'loop-detector', 'block', loopCheck.details.explanation);
+    await logRequestEvent(correlationId, targetModel, 'none', 429, latencyMs);
+
+    const errorMessage = `Loop detected: Agent blocked by enterprise safety rules. ${loopCheck.details.explanation}`;
+
+    if (reqBody.stream !== false) {
+      reply.hijack();
+      const raw = reply.raw;
+      try {
+        raw.writeHead(429, {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+          'connection':    'keep-alive',
+        });
+        
+        const loopAlert = JSON.stringify({
+          type: 'loop_alert',
+          session_id: sessionId,
+          correlation_id: correlationId,
+          loop_type: loopCheck.loopType,
+          confidence: loopCheck.confidence,
+          details: loopCheck.details
+        });
+        raw.write(`event: loop_alert\ndata: ${loopAlert}\n\n`);
+
+        const errorData = JSON.stringify({
+          type: 'error',
+          error: {
+            type: 'rate_limit_error',
+            message: errorMessage
+          }
+        });
+        raw.write(`event: error\ndata: ${errorData}\n\n`);
+      } catch (e: any) {
+        server.log.warn({ correlationId }, `Failed to write loop error to raw response: ${e.message}`);
+      } finally {
+        try { raw.end(); } catch {}
+      }
+    } else {
+      reply.status(429).send({
+        error: {
+          type: 'rate_limit_error',
+          message: errorMessage
+        }
+      });
+    }
+    return;
+  }
+
+  // 5. Context caching - inject cache headers for large prompts
+  recordCacheRequest();
+  const cacheResult = injectCacheHeaders(reqBody);
+  sanitizeCacheControlOrder(reqBody);
+
+  // 6. Policy evaluation
   const activeRules  = await getPolicies();
   const requestRepoPath = req.headers['x-ccr-repo-path'] as string || REPO_PATH;
   const policyResult = policyEngine.evaluateRequest(reqBody, requestRepoPath, activeRules);
@@ -583,7 +1013,7 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
     return;
   }
 
-  // 2. Route selection
+  // 7. Route selection
   const routeConfig  = await getRouteConfig();
   const activeRouteId = routeConfig.activeRoute;
   const activeMode    = routeConfig.activeMode;
@@ -628,7 +1058,7 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
     }
   }
 
-  // 3. Mock mode (#7): explicit header OR env-gated local-route mock.
+  // 8. Mock mode (#7): explicit header OR env-gated local-route mock.
   // Local routes only mock when MOCK_LOCAL=true — real Ollama routing is unaffected otherwise.
   const mockMode = req.headers['x-mock'] === 'true' || (MOCK_LOCAL && chosenRouteId.startsWith('local/'));
 
@@ -663,13 +1093,39 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
     return;
   }
 
-  // 3a. AWS vLLM proxy connector
+  // 9a. AWS vLLM proxy connector
   if (chosenRouteId.startsWith('aws-hosted/')) {
+    if (reqBody.stream !== false) {
+      reply.header('x-correlation-id',   correlationId)
+           .header('x-ccr-chosen-route', chosenRouteId)
+           .header('x-ccr-reason',       routingReason);
+      if (fallbackActive) reply.header('x-ccr-fallback', 'true');
+
+      streamVllmToAnthropic(chosenRouteId, reqBody, reply)
+        .then(async ({ statusCode, inputTokens: it, outputTokens: ot }) => {
+          reply.raw.end();
+          const endTime   = process.hrtime(startTime);
+          const latencyMs = Math.round(endTime[0] * 1000 + endTime[1] / 1000000);
+          await logRequestEvent(correlationId, targetModel, 'aws-hosted', statusCode, latencyMs);
+          await recordRequestTelemetry({
+            correlationId, inputTokens: it, outputTokens: ot, chosenRouteId,
+            activeMode, suggestedRouteId, isOverride, promptLength: promptText.length, routingReason,
+          });
+          lastRequestCache = { timestamp: Date.now(), promptText, routeUsed: chosenRouteId,
+            retryCount: currentRetryCount, correlationId };
+        }).catch((err: any) => {
+          server.log.error({ correlationId, error: err.message }, 'AWS hosted vLLM stream error');
+          try { reply.raw.end(); } catch {}
+        });
+      return reply;
+    }
+
     const vllmResponse = await invokeVllmModel(chosenRouteId, reqBody);
     
+    let vllmStatusCode = vllmResponse.statusCode;
+    let responseBodyText = vllmResponse.body;
     let inputTokens = 0;
     let outputTokens = 0;
-    let responseBodyText = vllmResponse.body;
 
     if (vllmResponse.statusCode === 200) {
       try {
@@ -679,7 +1135,20 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
         
         // Translate OpenAI response to Anthropic message format
         const translated = translateOpenAIToAnthropic(parsed, chosenRouteId);
-        responseBodyText = JSON.stringify(translated);
+        
+        // Scan for dangerous command outputs
+        const outboundCheck = policyEngine.evaluateModelResponse(translated);
+        if (!outboundCheck.allowed) {
+          vllmStatusCode = 403;
+          responseBodyText = JSON.stringify({
+            error: {
+              type: 'security_violation',
+              message: `Blocked dangerous command output: ${outboundCheck.blockedReason}`
+            }
+          });
+        } else {
+          responseBodyText = JSON.stringify(translated);
+        }
       } catch (e: any) {
         server.log.error({ correlationId, error: e.message }, 'Failed to parse or translate OpenAI response');
       }
@@ -688,7 +1157,7 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
     // Log request execution event
     const endTime = process.hrtime(startTime);
     const latencyMs = Math.round(endTime[0] * 1000 + endTime[1] / 1000000);
-    await logRequestEvent(correlationId, targetModel, 'aws-hosted', vllmResponse.statusCode, latencyMs);
+    await logRequestEvent(correlationId, targetModel, 'aws-hosted', vllmStatusCode, latencyMs);
 
     // Record spend and telemetry logs
     await recordRequestTelemetry({
@@ -720,11 +1189,11 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
     reply.header('x-ccr-reason', routingReason);
     reply.header('x-correlation-id', correlationId);
     reply.header('content-type', 'application/json');
-    reply.status(vllmResponse.statusCode).send(responseBodyText);
+    reply.status(vllmStatusCode).send(responseBodyText);
     return;
   }
 
-  // 3b. Bedrock Mantle proxy connector
+  // 9b. Bedrock Mantle proxy connector
   if (chosenRouteId.startsWith('mantle/')) {
     const registryEntry = UNIFIED_MODEL_REGISTRY.find(m => m.id === chosenRouteId);
     const mantleModelId = registryEntry?.mantleModelId;
@@ -742,6 +1211,43 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
 
     try {
       if (isAnthropicModel) {
+        if (reqBody.stream !== false) {
+          reply.header('x-correlation-id',   correlationId)
+               .header('x-ccr-chosen-route', chosenRouteId)
+               .header('x-ccr-reason',       routingReason)
+               .header('x-ccr-mantle-model', mantleModelId);
+          if (fallbackActive) reply.header('x-ccr-fallback', 'true');
+
+          streamMantleAnthropicToClient(mantleModelId, reqBody, reply)
+            .then(async ({ statusCode }) => {
+              reply.raw.end();
+              const endTime   = process.hrtime(startTime);
+              const latencyMs = Math.round(endTime[0] * 1000 + endTime[1] / 1000000);
+              await logRequestEvent(correlationId, targetModel, 'mantle', statusCode, latencyMs);
+              
+              let estimatedInput = 0;
+              if (reqBody.messages) {
+                let charCount = 0;
+                for (const msg of reqBody.messages) {
+                  if (typeof msg.content === 'string') charCount += msg.content.length;
+                }
+                estimatedInput = Math.ceil(charCount / 3.8);
+              }
+              // TODO: outputTokens: 50 is a placeholder estimate for Mantle Anthropic streaming
+              // The actual token count should be extracted from the final SSE usage chunk
+              await recordRequestTelemetry({
+                correlationId, inputTokens: estimatedInput, outputTokens: 50 /* placeholder */, chosenRouteId,
+                activeMode, suggestedRouteId, isOverride, promptLength: promptText.length, routingReason,
+              });
+              lastRequestCache = { timestamp: Date.now(), promptText, routeUsed: chosenRouteId,
+                retryCount: currentRetryCount, correlationId };
+            }).catch((err: any) => {
+              server.log.error({ correlationId, error: err.message }, 'Mantle Anthropic stream error');
+              try { reply.raw.end(); } catch {}
+            });
+          return reply;
+        }
+
         let res;
         if (registryEntry?.useBedrockNative) {
           server.log.info({ correlationId, mantleModelId }, 'useBedrockNative: routing via native Bedrock SDK client.');
@@ -766,20 +1272,60 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
           }
         }
       } else {
+        // ── OSS model via Mantle — always stream for instant first-token response ──
+        if (reqBody.stream !== false) {
+          // ── Streaming path — write directly to reply.raw (Fastify SSE pattern) ──
+          // SSE headers (content-type, cache-control, connection) are written by
+          // streamMantleOssToAnthropic → streamOpenAiCompletionsToAnthropic via raw.writeHead().
+          // reply.header() calls here would be silently dropped after hijack().
+          reply.header('x-correlation-id',   correlationId)
+               .header('x-ccr-chosen-route', chosenRouteId)
+               .header('x-ccr-reason',       routingReason)
+               .header('x-ccr-mantle-model', mantleModelId);
+          if (fallbackActive) reply.header('x-ccr-fallback', 'true');
+
+          streamMantleOssToAnthropic(mantleModelId, reqBody, reply)
+            .then(async ({ statusCode, inputTokens: it, outputTokens: ot }) => {
+              reply.raw.end();
+              const endTime   = process.hrtime(startTime);
+              const latencyMs = Math.round(endTime[0] * 1000 + endTime[1] / 1000000);
+              await logRequestEvent(correlationId, targetModel, 'mantle', statusCode, latencyMs);
+              await recordRequestTelemetry({
+                correlationId, inputTokens: it, outputTokens: ot, chosenRouteId,
+                activeMode, suggestedRouteId, isOverride, promptLength: promptText.length, routingReason,
+              });
+              lastRequestCache = { timestamp: Date.now(), promptText, routeUsed: chosenRouteId,
+                retryCount: currentRetryCount, correlationId };
+            }).catch((err: any) => {
+              server.log.error({ correlationId, error: err.message }, 'Mantle OSS stream error');
+              try { reply.raw.end(); } catch {}
+            });
+          return reply; // Headers will be sent — do not call reply.send()
+        }
+
+        // ── Non-streaming fallback (stream:false) ────────────────────────────
         const res = await invokeMantleOssModel(mantleModelId, reqBody);
         mantleStatusCode = res.statusCode;
-        if (res.statusCode === 200) {
+
+        // Log response for debugging
+        if (res.statusCode !== 200) {
+          server.log.warn({ correlationId, statusCode: res.statusCode, body: res.body }, 'Mantle OSS non-200 response');
+        } else if (!res.body || res.body.trim().length === 0) {
+          server.log.error({ correlationId, modelId: mantleModelId }, 'Mantle OSS returned empty response body');
+          mantleBody = JSON.stringify({ error: { type: 'api_error', message: 'Mantle OSS returned empty response. Check model ID.' } });
+          mantleStatusCode = 500;
+        } else {
           try {
             const parsed = JSON.parse(res.body);
             inputTokens  = parsed.usage?.prompt_tokens     || 0;
             outputTokens = parsed.usage?.completion_tokens || 0;
             const translated = translateOpenAIToAnthropic(parsed, chosenRouteId);
             mantleBody = JSON.stringify(translated);
-          } catch {
-            mantleBody = res.body;
+          } catch (parseErr: any) {
+            server.log.error({ correlationId, error: parseErr.message, body: res.body }, 'Failed to parse Mantle OSS response');
+            mantleBody = JSON.stringify({ error: { type: 'api_error', message: `Failed to parse response: ${parseErr.message}` } });
+            mantleStatusCode = 500;
           }
-        } else {
-          mantleBody = res.body;
         }
       }
     } catch (err: any) {
@@ -807,7 +1353,7 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
     return;
   }
 
-  // 3c. Native Anthropic upstream — used for escalations on subscription plans.
+  // 9c. Native Anthropic upstream — used for escalations on subscription plans.
   // Forwards the original auth headers so the request uses the user's subscription quota.
   // Cost = $0 marginal (covered by subscription). No AWS charges incurred.
   if (chosenRouteId === 'anthropic/native') {
@@ -815,14 +1361,7 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
       reply.status(401).send({ error: { type: 'authentication_error', message: 'No auth credentials available for native Anthropic escalation.' } });
       return;
     }
-    const forwardHeaders: Record<string, string> = {
-      'content-type':      'application/json',
-      'anthropic-version': (req.headers['anthropic-version'] as string) || '2023-06-01',
-    };
-    if (req.headers['x-api-key'])                                 forwardHeaders['x-api-key']         = req.headers['x-api-key'] as string;
-    else if (req.headers['authorization'])                        forwardHeaders['authorization']      = req.headers['authorization'] as string;
-    if (req.headers['anthropic-beta'])                            forwardHeaders['anthropic-beta']     = req.headers['anthropic-beta'] as string;
-    if (req.headers['anthropic-dangerous-direct-browser-access']) forwardHeaders['anthropic-dangerous-direct-browser-access'] = req.headers['anthropic-dangerous-direct-browser-access'] as string;
+    const forwardHeaders = buildForwardHeaders(req);
 
     const nativeRes  = await request(`${UPSTREAM_URL}/v1/messages`, {
       method: 'POST', headers: forwardHeaders, body: JSON.stringify(reqBody),
@@ -835,9 +1374,15 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
     await logRequestEvent(correlationId, targetModel, 'anthropic', nativeRes.statusCode, latencyMs);
 
     if (isStreaming) {
-      let rawBuf = '';
-      nativeRes.body.on('data', (chunk) => { rawBuf += chunk.toString(); });
-      nativeRes.body.on('end', async () => {
+      reply.hijack();
+      reply.raw.writeHead(nativeRes.statusCode, {
+        'content-type': nativeContentType,
+        'x-correlation-id': correlationId,
+        'x-ccr-chosen-route': chosenRouteId,
+        'x-ccr-reason': routingReason,
+      });
+
+      const tapStream = createTelemetryTapStream(async (rawBuf) => {
         const iMatch = rawBuf.match(/"input_tokens"\s*:\s*(\d+)/);
         const oMatch = rawBuf.match(/"output_tokens"\s*:\s*(\d+)/);
         const it = iMatch ? parseInt(iMatch[1], 10) : 0;
@@ -847,25 +1392,47 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
         lastRequestCache = { timestamp: Date.now(), promptText, routeUsed: chosenRouteId,
           retryCount: currentRetryCount, correlationId };
       });
+
+      tapStream.on('end', () => {
+        const endTime   = process.hrtime(startTime);
+        const latencyMs = Math.round(endTime[0] * 1000 + endTime[1] / 1000000);
+        server.log.info({ correlationId, status: nativeRes.statusCode, latencyMs, streaming: true }, 'request_completed');
+      });
+      nativeRes.body.pipe(tapStream).pipe(reply.raw);
+      return;
     } else {
       const bodyText = await nativeRes.body.text();
       let it = 0, ot = 0;
-      try { const p = JSON.parse(bodyText); it = p.usage?.input_tokens || 0; ot = p.usage?.output_tokens || 0; } catch {}
+      let finalBody = bodyText;
+      let finalStatusCode = nativeRes.statusCode;
+
+      try {
+        const p = JSON.parse(bodyText);
+        it = p.usage?.input_tokens || 0;
+        ot = p.usage?.output_tokens || 0;
+
+        // Scan native Anthropic response for dangerous commands
+        const outboundCheck = policyEngine.evaluateModelResponse(p);
+        if (!outboundCheck.allowed) {
+          finalStatusCode = 403;
+          finalBody = JSON.stringify({
+            error: {
+              type: 'security_violation',
+              message: `Blocked dangerous command output: ${outboundCheck.blockedReason}`
+            }
+          });
+        }
+      } catch {}
+
       await recordRequestTelemetry({ correlationId, inputTokens: it, outputTokens: ot,
         chosenRouteId, activeMode, suggestedRouteId, isOverride, promptLength: promptText.length, routingReason });
       lastRequestCache = { timestamp: Date.now(), promptText, routeUsed: chosenRouteId,
         retryCount: currentRetryCount, correlationId };
       reply.header('x-correlation-id', correlationId).header('x-ccr-chosen-route', chosenRouteId)
            .header('x-ccr-reason', routingReason).header('content-type', nativeContentType);
-      reply.status(nativeRes.statusCode).send(bodyText);
+      reply.status(finalStatusCode).send(finalBody);
       return;
     }
-
-    reply.header('x-correlation-id', correlationId).header('x-ccr-chosen-route', chosenRouteId)
-         .header('x-ccr-reason', routingReason).header('content-type', nativeContentType);
-    reply.status(nativeRes.statusCode);
-    reply.send(nativeRes.body);
-    return;
   }
 
   // 3d. Amazon Bedrock Runtime proxy connector
@@ -875,12 +1442,26 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
     
     let inputTokens = 0;
     let outputTokens = 0;
+    let bedrockStatusCode = bedrockResponse.statusCode;
+    let bedrockBody = bedrockResponse.body;
 
     if (bedrockResponse.statusCode === 200) {
       try {
         const parsed = JSON.parse(bedrockResponse.body);
         inputTokens = parsed.usage?.input_tokens || 0;
         outputTokens = parsed.usage?.output_tokens || 0;
+
+        // Scan for dangerous command outputs
+        const outboundCheck = policyEngine.evaluateModelResponse(parsed);
+        if (!outboundCheck.allowed) {
+          bedrockStatusCode = 403;
+          bedrockBody = JSON.stringify({
+            error: {
+              type: 'security_violation',
+              message: `Blocked dangerous command output: ${outboundCheck.blockedReason}`
+            }
+          });
+        }
       } catch (e: any) {
         server.log.warn({ correlationId, error: e.message }, 'Failed to parse Bedrock token usage');
       }
@@ -888,7 +1469,7 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
 
     const endTime = process.hrtime(startTime);
     const latencyMs = Math.round(endTime[0] * 1000 + endTime[1] / 1000000);
-    await logRequestEvent(correlationId, targetModel, 'bedrock', bedrockResponse.statusCode, latencyMs);
+    await logRequestEvent(correlationId, targetModel, 'bedrock', bedrockStatusCode, latencyMs);
 
     await recordRequestTelemetry({
       correlationId,
@@ -918,11 +1499,11 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
     reply.header('x-ccr-reason', routingReason);
     reply.header('x-correlation-id', correlationId);
     reply.header('content-type', 'application/json');
-    reply.status(bedrockResponse.statusCode).send(bedrockResponse.body);
+    reply.status(bedrockStatusCode).send(bedrockBody);
     return;
   }
 
-  // 4. Upstream proxy
+  // 10. Upstream proxy
   if (!apiKey) {
     server.log.warn({ correlationId }, 'Missing authentication header (x-api-key or authorization) for upstream public Anthropic API');
     reply.status(401).send({
@@ -932,14 +1513,7 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
   }
 
   try {
-    const forwardHeaders: Record<string, string> = {
-      'content-type':      'application/json',
-      'anthropic-version': anthropicVersion || '2023-06-01',
-    };
-    if (req.headers['x-api-key'])                                 forwardHeaders['x-api-key']         = req.headers['x-api-key'] as string;
-    else if (req.headers['authorization'])                        forwardHeaders['authorization']      = req.headers['authorization'] as string;
-    if (req.headers['anthropic-beta'])                            forwardHeaders['anthropic-beta']     = req.headers['anthropic-beta'] as string;
-    if (req.headers['anthropic-dangerous-direct-browser-access']) forwardHeaders['anthropic-dangerous-direct-browser-access'] = req.headers['anthropic-dangerous-direct-browser-access'] as string;
+    const forwardHeaders = buildForwardHeaders(req, anthropicVersion);
 
     const upstreamResponse = await request(`${UPSTREAM_URL}/v1/messages`, {
       method:  'POST',
@@ -950,26 +1524,27 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
     const upstreamContentType = (upstreamResponse.headers['content-type'] as string) || 'application/json';
     const isStreaming          = upstreamContentType.includes('text/event-stream');
 
-    reply.header('x-correlation-id', correlationId);
-    reply.header('x-ccr-suggested-route', suggestedRouteId);
-    reply.header('x-ccr-chosen-route', chosenRouteId);
-    reply.header('x-ccr-reason', routingReason);
-    if (fallbackActive) {
-      reply.header('x-ccr-fallback', 'true');
-    }
-    reply.header('content-type', upstreamContentType);
-    reply.status(upstreamResponse.statusCode);
-
     if (isStreaming) {
       const endTime   = process.hrtime(startTime);
       const latencyMs = Math.round(endTime[0] * 1000 + endTime[1] / 1000000);
       server.log.info({ correlationId, status: upstreamResponse.statusCode, latencyMs, streaming: true }, 'request_completed');
       await logRequestEvent(correlationId, targetModel, 'anthropic', upstreamResponse.statusCode, latencyMs);
 
-      // Background reader — captures token counts from SSE without blocking the stream.
-      let rawStreamBuffer = '';
-      upstreamResponse.body.on('data', (chunk) => { rawStreamBuffer += chunk.toString(); });
-      upstreamResponse.body.on('end', async () => {
+      reply.hijack();
+      
+      const responseHeaders: Record<string, string> = {
+        'content-type': upstreamContentType,
+        'x-correlation-id': correlationId,
+        'x-ccr-suggested-route': suggestedRouteId,
+        'x-ccr-chosen-route': chosenRouteId,
+        'x-ccr-reason': routingReason,
+      };
+      if (fallbackActive) {
+        responseHeaders['x-ccr-fallback'] = 'true';
+      }
+      reply.raw.writeHead(upstreamResponse.statusCode, responseHeaders);
+
+      const tapStream = createTelemetryTapStream(async (rawStreamBuffer) => {
         // input_tokens: first match (message_start) is the real input count.
         // output_tokens: LAST match (message_delta) is the cumulative final count;
         //               first match (message_start) is always 1 and must be ignored.
@@ -990,7 +1565,7 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicMessageBody 
                              retryCount: currentRetryCount, correlationId };
       });
 
-      reply.send(upstreamResponse.body);
+      upstreamResponse.body.pipe(tapStream).pipe(reply.raw);
     } else {
       const responseBodyText = await upstreamResponse.body.text();
       const endTime           = process.hrtime(startTime);
@@ -1342,19 +1917,28 @@ server.post('/v1/chat/completions', async (req: FastifyRequest<{ Body: OpenAICha
 
 async function logTelemetryEvent(event: any): Promise<void> {
   const telemetryFile = path.join(process.cwd(), 'ccr_telemetry.json');
-  try {
-    let list: any[] = [];
+  let retries = 5;
+  while (retries > 0) {
     try {
-      const raw = await fs.promises.readFile(telemetryFile, 'utf8');
-      list = JSON.parse(raw);
+      let list: any[] = [];
+      try {
+        const raw = await fs.promises.readFile(telemetryFile, 'utf8');
+        list = JSON.parse(raw);
+      } catch (e: any) {
+        if (e.code !== 'ENOENT') server.log.error(e, 'Failed to parse ccr_telemetry.json');
+      }
+      list.push(event);
+      if (list.length > 2000) list = list.slice(-2000);
+      await fs.promises.writeFile(telemetryFile, JSON.stringify(list, null, 2), 'utf8');
+      return;
     } catch (e: any) {
-      if (e.code !== 'ENOENT') server.log.error(e, 'Failed to parse ccr_telemetry.json');
+      retries--;
+      if (retries === 0) {
+        server.log.error(e, 'Failed to write to ccr_telemetry.json after retries');
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
-    list.push(event);
-    if (list.length > 2000) list = list.slice(-2000);
-    await fs.promises.writeFile(telemetryFile, JSON.stringify(list, null, 2), 'utf8');
-  } catch (e: any) {
-    server.log.error(e, 'Failed to write to ccr_telemetry.json');
   }
 }
 
@@ -1376,12 +1960,33 @@ const start = async () => {
       isVpnHealthy  = await checkVpnHealth().catch(() => false);
     }, 10000);
 
-    await server.listen({ port: PORT, host: '0.0.0.0' });
-    server.log.info(`ccr Gateway listening on port ${PORT}`);
+    try {
+      await server.listen({ port: PORT, host: '0.0.0.0' });
+      server.log.info(`ccr Gateway listening on port ${PORT}`);
+    } catch (err: any) {
+      if (err?.code === 'EADDRINUSE') {
+        server.log.warn(`Port ${PORT} in use — killing old process and retrying in 1s...`);
+        freePort(PORT);
+        await new Promise(r => setTimeout(r, 1000));
+        await server.listen({ port: PORT, host: '0.0.0.0' });
+        server.log.info(`ccr Gateway listening on port ${PORT} (after port recovery)`);
+      } else {
+        server.log.error(err);
+      }
+    }
   } catch (err) {
     server.log.error(err);
-    process.exit(1);
   }
 };
 
-start();
+process.on('uncaughtException', (err) => {
+  console.error('[ccr-gateway] uncaughtException — staying alive:', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[ccr-gateway] unhandledRejection — staying alive:', reason);
+});
+
+if (process.env.NODE_ENV !== 'test') {
+  start();
+}

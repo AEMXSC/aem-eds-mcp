@@ -69,7 +69,7 @@ export async function renderDashboard(vllmHealthy = true, vpnHealthy = true): Pr
   const capitalizedMode = activeMode.charAt(0).toUpperCase() + activeMode.slice(1);
 
   // Parse feedback_records safely
-  const feedbackList = (db as any).feedback_records || [];
+  const feedbackList = (db as { feedback_records?: Array<{ id: string; correlationId: string; outcome: string; rating: string; comments: string; timestamp: string }> }).feedback_records || [];
 
   // Initialize Route Analytics Metrics Object
   const routeMetrics: Record<string, {
@@ -199,6 +199,7 @@ export async function renderDashboard(vllmHealthy = true, vpnHealthy = true): Pr
           <td>${m.totalTasks}</td>
           <td>${m.avgLatency}ms</td>
           <td>$${m.actualCost.toFixed(4)}</td>
+          <td>$${m.baselineCost.toFixed(4)}</td>
           <td style="color: var(--spectrum-accent-green); font-weight: 600;">$${m.savings.toFixed(4)}</td>
           <td><span class="status-indicator status-allow">${displayKeep}</span></td>
           <td><span class="status-indicator status-warn">${displayRework}</span></td>
@@ -1088,8 +1089,11 @@ export async function renderDashboard(vllmHealthy = true, vpnHealthy = true): Pr
           <div class="breadcrumbs">
             Security Control Plane / <span id="current-breadcrumb">Dashboard</span>
           </div>
-          <div class="system-status">
-            IDE Active Model: <span style="font-weight: 600; color: #ec7211;">${escapeHtml(activeModelName)}</span> (<span style="color: #bbb;">${escapeHtml(capitalizedMode)}</span>)
+          <div style="display: flex; align-items: center; gap: 1.5rem;">
+            <div class="system-status">
+              IDE Active Model: <span style="font-weight: 600; color: #ec7211;">${escapeHtml(activeModelName)}</span> (<span style="color: #bbb;">${escapeHtml(capitalizedMode)}</span>)
+            </div>
+            <button onclick="resetTelemetryData()" class="btn-spectrum secondary" style="font-size: 0.75rem; padding: 0.25rem 0.75rem; border-color: rgba(215, 55, 63, 0.4); color: var(--spectrum-accent-red); border-radius: 4px;">Reset Metrics</button>
           </div>
         </div>
 
@@ -1172,6 +1176,7 @@ export async function renderDashboard(vllmHealthy = true, vpnHealthy = true): Pr
                     <th>Tasks Routed</th>
                     <th>Avg Latency</th>
                     <th>Actual Cost</th>
+                    <th>Baseline (Sonnet 4.5)</th>
                     <th>Total Savings</th>
                     <th>Keep Rate</th>
                     <th>Rework Rate</th>
@@ -1643,6 +1648,18 @@ export async function renderDashboard(vllmHealthy = true, vpnHealthy = true): Pr
             window.location.reload();
           } else {
             alert('Failed to delete policy rule.');
+          }
+        }
+
+        async function resetTelemetryData() {
+          if (!confirm('Are you sure you want to reset all telemetry data, request logs, policy hit history, and economics? This action cannot be undone.')) return;
+          const response = await fetch('/admin/api/reset', {
+            method: 'POST'
+          });
+          if (response.ok) {
+            window.location.reload();
+          } else {
+            alert('Failed to reset telemetry data.');
           }
         }
       </script>

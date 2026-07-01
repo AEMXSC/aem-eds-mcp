@@ -3,6 +3,8 @@ import * as path from 'path';
 
 // 'route' is distinct from 'warn': it allows the request but overrides the routing destination.
 export type PolicyMode = 'monitor' | 'warn' | 'enforce' | 'route';
+export type PolicyType = 'file_path' | 'regex_pattern' | 'ccrignore';
+export type PolicyScope = 'repo' | 'global';
 
 export interface PolicyRule {
   id: string;
@@ -122,7 +124,7 @@ export class PolicyEngine {
       return result;
     }
 
-    const messages = body.messages as any[];
+    const messages = body.messages as Array<{ role: string; content: string | Array<{ type: string; text?: string }> }>;
 
     if (repoPath) {
       const ccrIgnorePatterns = this.loadCcrIgnore(repoPath);
@@ -322,6 +324,50 @@ export class PolicyEngine {
                   return { allowed: false, matchedPath: filePath };
                 }
               }
+            }
+          }
+        }
+      }
+    }
+    return { allowed: true };
+  }
+
+  /**
+   * Scans a command string against known destructive shell patterns.
+   */
+  public isCommandDangerous(command: string): { dangerous: boolean; reason?: string } {
+    const blockedPatterns = [
+      { regex: /rm\s+-rf\s+([*./]|\$[A-Z_]+)/i, reason: 'Destructive recursive deletion' },
+      { regex: /chmod\s+-[rwx]*777/i, reason: 'Insecure wide-open permission grant' },
+      { regex: /(curl|wget)\s+.*\|\s*(bash|sh|zsh)/i, reason: 'Raw internet script piping/execution' },
+      { regex: /dd\s+if=.*of=\/dev\/(sd|nvme|hd)/i, reason: 'Raw disk block overwrite write operation' },
+      { regex: /mkfs\.[a-z0-9]+/i, reason: 'Filesystem formatting operation' },
+      { regex: /:(){ :|:& };:/, reason: 'Fork bomb resource exhaustion attack' }
+    ];
+
+    for (const p of blockedPatterns) {
+      if (p.regex.test(command)) {
+        return { dangerous: true, reason: p.reason };
+      }
+    }
+    return { dangerous: false };
+  }
+
+  /**
+   * Scans an outgoing non-streaming model response for dangerous shell execution tool calls.
+   */
+  public evaluateModelResponse(responseBody: any): { allowed: boolean; blockedReason?: string } {
+    if (!responseBody) return { allowed: true };
+
+    const content = responseBody.content;
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (block.type === 'tool_use' && (block.name === 'run_command' || block.name === 'bash' || block.name === 'execute_command')) {
+          const command = block.input?.command;
+          if (typeof command === 'string') {
+            const check = this.isCommandDangerous(command);
+            if (check.dangerous) {
+              return { allowed: false, blockedReason: check.reason };
             }
           }
         }

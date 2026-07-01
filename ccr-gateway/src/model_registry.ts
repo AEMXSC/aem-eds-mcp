@@ -195,7 +195,7 @@ export const UNIFIED_MODEL_REGISTRY: ModelRegistryEntry[] = [
     availabilityStatus: 'online',
     aws_region: 'us-east-1',
     health: 'healthy',
-    mantleModelId: 'qwen.qwen3-coder-480b-a35b-instruct',
+    mantleModelId: 'qwen.qwen3-coder-480b',
   },
   {
     id: 'mantle/devstral-2-123b',
@@ -236,7 +236,7 @@ export const UNIFIED_MODEL_REGISTRY: ModelRegistryEntry[] = [
     availabilityStatus: 'online',
     aws_region: 'us-east-1',
     health: 'healthy',
-    mantleModelId: 'mistral.mistral-large-3-675b-instruct',
+    mantleModelId: 'mistral.mistral-large-3',
   },
   {
     id: 'mantle/gpt-5.5',
@@ -276,6 +276,19 @@ export const UNIFIED_MODEL_REGISTRY: ModelRegistryEntry[] = [
     aws_region: 'us-east-1',
     health: 'healthy',
     mantleModelId: 'openai.gpt-oss-120b',
+  },
+  {
+    id: 'mantle/glm-5.2-instruct',
+    name: 'GLM 5.2 Instruct (Mantle)',
+    provider: 'glm',
+    hosting: 'mantle',
+    cost: '$0.00030 / 1k tokens (Est. Savings: 90%)',
+    supportedModes: ['manual', 'suggested', 'auto'],
+    policyTags: ['frontier', 'high-reasoning', 'oss', 'mantle'],
+    availabilityStatus: 'online',
+    aws_region: 'us-east-1',
+    health: 'healthy',
+    mantleModelId: 'zai.glm-5.2-instruct',
   },
   {
     id: 'mantle/qwen3-coder-next',

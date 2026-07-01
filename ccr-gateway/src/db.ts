@@ -48,6 +48,28 @@ export interface FeedbackRecord {
   timestamp: string;
 }
 
+export interface ToolCallRecord {
+  id: string;
+  session_id: string;
+  timestamp: number;
+  tool_name: string;
+  tool_args_hash: string;
+  tool_result_status?: 'success' | 'failure';
+  file_path?: string;
+  line_range?: string;
+}
+
+export interface CacheSpendRecord {
+  id: string;
+  correlation_id: string;
+  original_tokens: number;
+  cached_tokens: number;
+  actual_cost: number;
+  baseline_cost: number;
+  delta: number;
+  timestamp: string;
+}
+
 import { PolicyRule, DEFAULT_RULES } from './policy.js';
 
 export interface RouteConfig {
@@ -62,6 +84,8 @@ interface DatabaseSchema {
   repo_configs: RepoConfig[];
   policy_rules: PolicyRule[];
   feedback_records: FeedbackRecord[];
+  tool_call_records: ToolCallRecord[];
+  cache_spend_records: CacheSpendRecord[];
   active_route?: string;
   active_mode?: string;
 }
@@ -70,26 +94,37 @@ interface DatabaseSchema {
  * Reads database contents from local JSON file.
  */
 export async function readDb(): Promise<DatabaseSchema> {
-  try {
-    const raw = await fs.promises.readFile(DB_FILE, 'utf8');
-    const parsed = JSON.parse(raw);
-    return {
-      request_events: parsed.request_events || [],
-      policy_hits: parsed.policy_hits || [],
-      spend_records: parsed.spend_records || [],
-      repo_configs: parsed.repo_configs || [],
-      policy_rules: parsed.policy_rules || [],
-      feedback_records: parsed.feedback_records || [],
-      active_route: parsed.active_route,
-      active_mode: parsed.active_mode
-    };
-  } catch (e: any) {
-    if (e.code === 'ENOENT') {
-      return { request_events: [], policy_hits: [], spend_records: [], repo_configs: [], policy_rules: [], feedback_records: [] };
+  let retries = 5;
+  while (retries > 0) {
+    try {
+      const raw = await fs.promises.readFile(DB_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      return {
+        request_events: parsed.request_events || [],
+        policy_hits: parsed.policy_hits || [],
+        spend_records: parsed.spend_records || [],
+        repo_configs: parsed.repo_configs || [],
+        policy_rules: parsed.policy_rules || [],
+        feedback_records: parsed.feedback_records || [],
+        tool_call_records: parsed.tool_call_records || [],
+        cache_spend_records: parsed.cache_spend_records || [],
+        active_route: parsed.active_route,
+        active_mode: parsed.active_mode
+      };
+    } catch (e: any) {
+      if (e.code === 'ENOENT') {
+        return { request_events: [], policy_hits: [], spend_records: [], repo_configs: [], policy_rules: [], feedback_records: [], tool_call_records: [], cache_spend_records: [] };
+      }
+      retries--;
+      if (retries === 0) {
+        console.error(`Failed to read local database file: ${e.message}, returning empty schema.`);
+        return { request_events: [], policy_hits: [], spend_records: [], repo_configs: [], policy_rules: [], feedback_records: [], tool_call_records: [], cache_spend_records: [] };
+      }
+      // Wait 50ms before retrying to resolve lock conflict
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
-    console.error('Failed to read local database file, returning empty schema.');
-    return { request_events: [], policy_hits: [], spend_records: [], repo_configs: [], policy_rules: [], feedback_records: [] };
   }
+  return { request_events: [], policy_hits: [], spend_records: [], repo_configs: [], policy_rules: [], feedback_records: [], tool_call_records: [], cache_spend_records: [] };
 }
 
 /**
@@ -111,6 +146,8 @@ export async function initDatabase(): Promise<void> {
   const db = await readDb();
   if (!db.policy_rules || db.policy_rules.length === 0) {
     db.policy_rules = DEFAULT_RULES.map(r => ({ ...r, hit_count: 0 }));
+    db.tool_call_records = [];
+    db.cache_spend_records = [];
     await writeDb(db);
   }
   console.log('JSON database successfully initialized.');
@@ -306,3 +343,67 @@ export async function logFeedback(
   }
   await writeDb(db);
 }
+
+/**
+ * Clears request events, policy hits, spend records, and feedback records.
+ * Resets policy rules to default rules with 0 hit counts.
+ */
+export async function clearAllData(): Promise<void> {
+  const db = await readDb();
+  db.request_events = [];
+  db.policy_hits = [];
+  db.spend_records = [];
+  db.feedback_records = [];
+  db.tool_call_records = [];
+  db.cache_spend_records = [];
+  db.policy_rules = DEFAULT_RULES.map(r => ({ ...r, hit_count: 0 }));
+  await writeDb(db);
+}
+
+/**
+ * Log a tool call record for loop detection.
+ */
+export async function logToolCallRecord(record: ToolCallRecord): Promise<void> {
+  const db = await readDb();
+  if (!db.tool_call_records) {
+    db.tool_call_records = [];
+  }
+  db.tool_call_records.push(record);
+  if (db.tool_call_records.length > 10000) {
+    db.tool_call_records = db.tool_call_records.slice(-10000);
+  }
+  await writeDb(db);
+}
+
+/**
+ * Log a cache spend record for telemetry.
+ */
+export async function logCacheSpendRecord(
+  correlationId: string,
+  originalTokens: number,
+  cachedTokens: number,
+  actualCost: number,
+  baselineCost: number,
+  delta: number
+): Promise<void> {
+  const db = await readDb();
+  if (!db.cache_spend_records) {
+    db.cache_spend_records = [];
+  }
+  const newRecord: CacheSpendRecord = {
+    id: uuidv4(),
+    correlation_id: correlationId,
+    original_tokens: originalTokens,
+    cached_tokens: cachedTokens,
+    actual_cost: actualCost,
+    baseline_cost: baselineCost,
+    delta,
+    timestamp: new Date().toISOString()
+  };
+  db.cache_spend_records.push(newRecord);
+  if (db.cache_spend_records.length > 5000) {
+    db.cache_spend_records = db.cache_spend_records.slice(-5000);
+  }
+  await writeDb(db);
+}
+
