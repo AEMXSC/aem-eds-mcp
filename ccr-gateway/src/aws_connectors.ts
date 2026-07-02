@@ -495,17 +495,39 @@ export async function streamOpenAiCompletionsToAnthropic(
     headers['Authorization'] = authHeaderValue;
   }
 
+  // undici's headersTimeout/bodyTimeout only fire on genuine socket-level stalls. A
+  // connection that goes silently idle without an actual TCP reset or FIN — exactly what
+  // network-path interference (proxy/firewall black-holing rather than rejecting) looks
+  // like — can sit in `for await (const rawChunk of res.body)` indefinitely with neither
+  // timeout ever tripping. That produced requests that just never completed: no error, no
+  // truncation, no server-side signal at all, while the client eventually gave up and
+  // reported "malformed response". This abort controller enforces a hard inactivity
+  // ceiling reset on every received chunk, independent of undici's own timeouts.
+  const abortController = new AbortController();
+  const INACTIVITY_TIMEOUT_MS = 45_000;
+  let inactivityTimer!: NodeJS.Timeout; // always assigned by resetInactivityTimer() before use
+  const resetInactivityTimer = () => {
+    clearTimeout(inactivityTimer);
+    inactivityTimer = setTimeout(() => abortController.abort(), INACTIVITY_TIMEOUT_MS);
+  };
+
   let res: any;
   try {
+    resetInactivityTimer();
     res = await request(endpointUrl, {
       method: 'POST',
       headers,
       body: JSON.stringify(openAIPayload),
       headersTimeout: 30_000,   // Streaming headers arrive fast — keep tight
       bodyTimeout:    300_000,  // 5 min for full generation stream
+      signal:         abortController.signal,
     });
   } catch (err: any) {
-    reply.status(503).send({ error: { type: 'api_error', message: `OSS endpoint connection error: ${err.message}` } });
+    clearTimeout(inactivityTimer);
+    const message = abortController.signal.aborted
+      ? `OSS endpoint stopped responding (no data for ${INACTIVITY_TIMEOUT_MS / 1000}s) — connection aborted.`
+      : `OSS endpoint connection error: ${err.message}`;
+    reply.status(503).send({ error: { type: 'api_error', message } });
     return { statusCode: 503, inputTokens: 0, outputTokens: 0 };
   }
 
@@ -552,6 +574,7 @@ export async function streamOpenAiCompletionsToAnthropic(
   let blockIndex     = 0;      // Sequential content block counter
   let textBlockOpen  = false;
   let textBlockIdx   = -1;
+  let streamClosedCleanly = false; // set true only once message_stop is actually emitted
 
   // Tool call accumulation: OpenAI sends tool args across multiple chunks.
   // Key = OpenAI tool_calls[].index, Value = block metadata.
@@ -604,6 +627,7 @@ export async function streamOpenAiCompletionsToAnthropic(
     let firstChunkChecked = false;
 
     for await (const rawChunk of res.body) {
+      resetInactivityTimer();
       const chunkStr = Buffer.isBuffer(rawChunk) ? rawChunk.toString('utf8') : String(rawChunk);
 
       if (!firstChunkChecked) {
@@ -763,11 +787,49 @@ export async function streamOpenAiCompletionsToAnthropic(
             usage: { output_tokens: outputTokens },
           });
           emit('message_stop', { type: 'message_stop' });
+          streamClosedCleanly = true;
         }
       }
     }
+  } catch (err: any) {
+    // Swallow here (including AbortError from the inactivity timeout) and fall through to
+    // the streamClosedCleanly check below, which already emits a proper SSE error event —
+    // avoids a second, differently-shaped error path for what's ultimately the same
+    // client-facing outcome: an incomplete stream that needs a clear explanation.
+    if (!abortController.signal.aborted) {
+      reply.log.warn({ err: err.message }, 'Mantle OSS stream iteration error (non-abort)');
+    }
   } finally {
     clearInterval(pingTimer);
+    clearTimeout(inactivityTimer);
+  }
+
+  // Upstream connection closed (res.body iterator exhausted) without ever sending a
+  // finish_reason chunk — e.g. dropped/truncated mid-stream by something on the network
+  // path to Bedrock. Fastify already logged this request as a fast, clean 200 back when
+  // reply.hijack() was called (before this loop even started), so that log line is not
+  // trustworthy for detecting this. Left as-is, the client receives a stream that opened
+  // (message_start, maybe partial content) but never closed — Claude Code's SDK reports
+  // that as "empty or malformed response". Emit a real error event instead of silence.
+  if (!streamClosedCleanly) {
+    const wasInactivityAbort = abortController.signal.aborted;
+    reply.log.warn({ endpointUrl, accumulatedOutputChars, wasInactivityAbort },
+      wasInactivityAbort
+        ? `Upstream went silent for ${INACTIVITY_TIMEOUT_MS / 1000}s and was aborted — client will see a malformed/empty response`
+        : 'Upstream stream ended without a finish_reason — truncated mid-stream, client will see a malformed/empty response');
+    if (textBlockOpen) {
+      emit('content_block_stop', { type: 'content_block_stop', index: textBlockIdx });
+    }
+    emit('error', {
+      type: 'error',
+      error: {
+        type: 'api_error',
+        message: wasInactivityAbort
+          ? `Upstream stopped sending data for ${INACTIVITY_TIMEOUT_MS / 1000}s and the connection was aborted (likely a network path issue between ccr-core and Bedrock).`
+          : 'Upstream connection closed before the response completed (truncated stream).',
+      },
+    });
+    return { statusCode: 502, inputTokens: inputTokens || estimatedInputTokens, outputTokens };
   }
 
   if (inputTokens === 0) inputTokens = estimatedInputTokens;
@@ -823,6 +885,24 @@ export async function checkVllmHealth(): Promise<boolean> {
   try {
     const res = await request(`${VLLM_ENDPOINT}/health`, {
       method: 'GET',
+      headersTimeout: 3000 // 3s timeout
+    });
+    return res.statusCode === 200;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Quick Bedrock Mantle endpoint ping check — used to fall traffic back to
+ * anthropic/native (subscription/API-key billing) when Mantle is unreachable.
+ */
+export async function checkMantleHealth(): Promise<boolean> {
+  if (!AWS_BEARER_TOKEN_BEDROCK) return false;
+  try {
+    const res = await request(`${MANTLE_BASE}/v1/models`, {
+      method: 'GET',
+      headers: { authorization: `Bearer ${AWS_BEARER_TOKEN_BEDROCK}` },
       headersTimeout: 3000 // 3s timeout
     });
     return res.statusCode === 200;

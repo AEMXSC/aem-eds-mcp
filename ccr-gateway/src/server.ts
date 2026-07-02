@@ -69,7 +69,8 @@ import { detectLoop, recordToolCall, recordToolResult, recordEditTool, recordPro
 import { injectCacheHeaders, recordCacheRequest } from './context_cache.js';
 import type { AnthropicRequestBody } from './aws_connectors.js';
 import { UNIFIED_MODEL_REGISTRY } from './model_registry.js';
-import { checkVllmHealth, checkVpnHealth, invokeBedrockModel, invokeVllmModel, invokeMantleAnthropicModel, invokeMantleOssModel, streamMantleOssToAnthropic, streamMantleAnthropicToClient, streamVllmToAnthropic, translateOpenAIToAnthropic, sanitizeAnthropicRequestBody } from './aws_connectors.js';
+import { buildForwardHeaders } from './shared/anthropic_headers.js';
+import { checkVllmHealth, checkVpnHealth, checkMantleHealth, invokeBedrockModel, invokeVllmModel, invokeMantleAnthropicModel, invokeMantleOssModel, streamMantleOssToAnthropic, streamMantleAnthropicToClient, streamVllmToAnthropic, translateOpenAIToAnthropic, sanitizeAnthropicRequestBody } from './aws_connectors.js';
 import { renderDashboard } from './dashboard.js';
 import { renderCisoReport } from './ciso_report.js';
 
@@ -220,6 +221,7 @@ const VALID_SCOPES       = ['repo', 'global'] as const;
 
 let isVllmHealthy = true;
 let isVpnHealthy = true;
+let isMantleHealthy = true;
 
 const policyEngine = new PolicyEngine({
   workspacePolicyEnabled: process.env.CCR_DISABLE_WORKSPACE_POLICY !== 'true',
@@ -296,33 +298,6 @@ function getSessionId(headers: Record<string, string | string[] | undefined>, co
     return sessionId;
   }
   return correlationId;
-}
-
-/**
- * Dynamically builds forward headers for upstream requests.
- * Automatically forwards all headers starting with 'anthropic-' or standard auth headers.
- * Normalizes keys to lowercase to ensure consistency.
- */
-export function buildForwardHeaders(req: FastifyRequest, defaultVersion = '2023-06-01'): Record<string, string> {
-  const forwardHeaders: Record<string, string> = {
-    'content-type': 'application/json'
-  };
-
-  for (const key of Object.keys(req.headers)) {
-    const lowerKey = key.toLowerCase();
-    if (lowerKey.startsWith('anthropic-') || lowerKey === 'authorization' || lowerKey === 'x-api-key') {
-      const val = req.headers[key];
-      if (val !== undefined && val !== null) {
-        forwardHeaders[lowerKey] = Array.isArray(val) ? val.join(', ') : String(val);
-      }
-    }
-  }
-
-  if (!forwardHeaders['anthropic-version']) {
-    forwardHeaders['anthropic-version'] = defaultVersion;
-  }
-
-  return forwardHeaders;
 }
 
 // ── Loop Detection Integration ───────────────────────────────────────────────
@@ -648,25 +623,27 @@ async function recordRequestTelemetry(params: TelemetryParams): Promise<void> {
   // Subscription routes have $0 marginal cost; delta shows what the equivalent paid model would cost (comparative only).
   const delta         = baselineCost - actualCost;
 
-  await logSpendRecord(correlationId, inputTokens, outputTokens, actualCost, baselineCost, delta);
-  await logCacheSpendRecord(correlationId, inputTokens, cachedTokens, actualCost, baselineCost, delta);
-  await logTelemetryEvent({
-    eventId:        uuidv4(),
-    correlationId,
-    timestamp:      new Date().toISOString(),
-    routingMode:    activeMode,
-    suggestedRoute: suggestedRouteId,
-    chosenRoute:    chosenRouteId,
-    override:       isOverride,
-    inputTokens,
-    outputTokens,
-    actualCost,
-    baselineCost,
-    delta,
-    promptLength,
-    reason:         routingReason,
-    cachedTokens,
-  });
+  await Promise.all([
+    logSpendRecord(correlationId, inputTokens, outputTokens, actualCost, baselineCost, delta),
+    logCacheSpendRecord(correlationId, inputTokens, cachedTokens, actualCost, baselineCost, delta),
+    logTelemetryEvent({
+      eventId:        uuidv4(),
+      correlationId,
+      timestamp:      new Date().toISOString(),
+      routingMode:    activeMode,
+      suggestedRoute: suggestedRouteId,
+      chosenRoute:    chosenRouteId,
+      override:       isOverride,
+      inputTokens,
+      outputTokens,
+      actualCost,
+      baselineCost,
+      delta,
+      promptLength,
+      reason:         routingReason,
+      cachedTokens,
+    })
+  ]);
 }
 
 // ── Request body interfaces ───────────────────────────────────────────────────
@@ -826,7 +803,35 @@ function selectRoute(params: SelectRouteParams): SelectRouteResult {
     fallbackActive   = true;
   }
 
+  // Mantle health fallback — if Mantle itself is down (including as the vLLM fallback
+  // target above), drop to anthropic/native so the client's own subscription/API key
+  // covers the request instead of erroring out or bouncing to another paid AWS route.
+  if (finalRouteId.startsWith('mantle/') && !isMantleHealthy) {
+    finalRouteId   = 'anthropic/native';
+    routingReason  = 'mantle_unhealthy_fallback_to_native';
+    fallbackActive = true;
+  }
+
   return { suggestedRouteId, routingReason, finalRouteId, fallbackActive };
+}
+
+// Requests blocked before route selection runs (loop-detector, policy block) never get a
+// chosen route, so they were logged under the raw client-sent model name (always
+// "claude-sonnet-4-5" for Claude Code) instead of the route that's actually configured.
+// That name isn't a registry id, so these events were silently dropped from per-lane
+// tallies while still counting toward the total request count. Resolve the route the
+// same way step 7 does, purely for attribution/logging on the blocked path.
+async function resolveBlockedRouteId(promptText: string, forcedRoute?: string, triggeredRules: string[] = []): Promise<string> {
+  const routeConfig = await getRouteConfig();
+  const { finalRouteId } = selectRoute({
+    activeRouteId:  routeConfig.activeRoute,
+    activeMode:     routeConfig.activeMode,
+    promptText,
+    currentRetryCount: 0,
+    forcedRoute,
+    triggeredRules,
+  });
+  return finalRouteId;
 }
 
 // ── Primary Gateway: Anthropic Messages proxy ─────────────────────────────────
@@ -938,7 +943,8 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicRequestBody 
 
     // Log policy hit for loop detection
     await logPolicyHit(correlationId, 'loop-detector', 'block', loopCheck.details.explanation);
-    await logRequestEvent(correlationId, targetModel, 'none', 429, latencyMs);
+    const blockedRouteId = await resolveBlockedRouteId(promptText);
+    await logRequestEvent(correlationId, blockedRouteId, 'none', 429, latencyMs);
 
     const errorMessage = `Loop detected: Agent blocked by enterprise safety rules. ${loopCheck.details.explanation}`;
 
@@ -1001,7 +1007,8 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicRequestBody 
     const latencyMs = Math.round(endTime[0] * 1000 + endTime[1] / 1000000);
     server.log.warn({ correlationId, triggeredRules: policyResult.triggeredRules, latencyMs },
       `Request BLOCKED by ccr Policy: ${policyResult.blockedReason}`);
-    await logRequestEvent(correlationId, targetModel, 'none', 400, latencyMs);
+    const blockedRouteId = await resolveBlockedRouteId(promptText, policyResult.forcedRoute, policyResult.triggeredRules);
+    await logRequestEvent(correlationId, blockedRouteId, 'none', 400, latencyMs);
     for (const ruleId of policyResult.triggeredRules) {
       await logPolicyHit(correlationId, ruleId, 'block', policyResult.blockedReason);
       await incrementPolicyHits(ruleId);
@@ -1036,6 +1043,30 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicRequestBody 
     forcedRoute:    policyResult.forcedRoute,
     triggeredRules: policyResult.triggeredRules,
   });
+
+  // Manual mode means the user explicitly pinned this exact route. Silently substituting
+  // a different model when that pin is unhealthy (vs. erroring) is what made it look like
+  // "the dropdown does nothing" — every pick of an unreachable aws-hosted/EKS route quietly
+  // became DeepSeek-on-Mantle with zero visible signal in the chat itself (fallbackActive
+  // only ever sets a response header, which never surfaces in the transcript). Health-based
+  // fallback still makes sense in suggested/auto mode (no explicit pin to honor), so this is
+  // scoped to manual mode + the health-fallback reason specifically — policy-forced overrides
+  // (compliance rules) are intentionally left silent-and-applied, not blocked.
+  if (activeMode === 'manual' && routingReason === 'oss_route_unhealthy_fallback') {
+    const latencyMs = Math.round(process.hrtime(startTime)[0] * 1000 + process.hrtime(startTime)[1] / 1000000);
+    server.log.warn({ correlationId, activeRouteId, wouldFallbackTo: finalRouteId },
+      'Manual route pin is unreachable — returning explicit error instead of silently substituting a different model.');
+    await logRequestEvent(correlationId, activeRouteId, 'none', 503, latencyMs);
+    reply.status(503).send({
+      error: {
+        type: 'api_error',
+        message: `Selected route "${activeRouteId}" is currently unreachable (backend health check failing). ` +
+          `ccr does not silently substitute a different model for an explicit manual pin — pick a different ` +
+          `route in the dropdown, or switch to Suggested/Auto mode to allow automatic health-based fallback.`,
+      },
+    });
+    return;
+  }
 
   const chosenRouteId = finalRouteId;
   const isOverride    = activeMode === 'suggested' && chosenRouteId !== activeRouteId;
@@ -1074,7 +1105,8 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicRequestBody 
 
     const endTime   = process.hrtime(startTime);
     const latencyMs = Math.round(endTime[0] * 1000 + endTime[1] / 1000000);
-    await logRequestEvent(correlationId, targetModel, 'mock', 200, latencyMs);
+    // Logged model is the mock route, matching what the mock response body reports (#31).
+    await logRequestEvent(correlationId, chosenRouteId, 'mock', 200, latencyMs);
     await recordRequestTelemetry({
       correlationId, inputTokens: 150, outputTokens: 80,
       chosenRouteId, activeMode, suggestedRouteId, isOverride,
@@ -1106,7 +1138,8 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicRequestBody 
           reply.raw.end();
           const endTime   = process.hrtime(startTime);
           const latencyMs = Math.round(endTime[0] * 1000 + endTime[1] / 1000000);
-          await logRequestEvent(correlationId, targetModel, 'aws-hosted', statusCode, latencyMs);
+          // Logged model is the actually-invoked OSS route, not the client's requested model (#31).
+          await logRequestEvent(correlationId, chosenRouteId, 'aws-hosted', statusCode, latencyMs);
           await recordRequestTelemetry({
             correlationId, inputTokens: it, outputTokens: ot, chosenRouteId,
             activeMode, suggestedRouteId, isOverride, promptLength: promptText.length, routingReason,
@@ -1157,7 +1190,8 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicRequestBody 
     // Log request execution event
     const endTime = process.hrtime(startTime);
     const latencyMs = Math.round(endTime[0] * 1000 + endTime[1] / 1000000);
-    await logRequestEvent(correlationId, targetModel, 'aws-hosted', vllmStatusCode, latencyMs);
+    // Logged model is the actually-invoked OSS route, not the client's requested model (#31).
+    await logRequestEvent(correlationId, chosenRouteId, 'aws-hosted', vllmStatusCode, latencyMs);
 
     // Record spend and telemetry logs
     await recordRequestTelemetry({
@@ -1223,8 +1257,9 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicRequestBody 
               reply.raw.end();
               const endTime   = process.hrtime(startTime);
               const latencyMs = Math.round(endTime[0] * 1000 + endTime[1] / 1000000);
-              await logRequestEvent(correlationId, targetModel, 'mantle', statusCode, latencyMs);
-              
+              // Logged model is the actually-invoked Mantle model, not the client's requested model (#31).
+              await logRequestEvent(correlationId, mantleModelId, 'mantle', statusCode, latencyMs);
+
               let estimatedInput = 0;
               if (reqBody.messages) {
                 let charCount = 0;
@@ -1289,7 +1324,8 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicRequestBody 
               reply.raw.end();
               const endTime   = process.hrtime(startTime);
               const latencyMs = Math.round(endTime[0] * 1000 + endTime[1] / 1000000);
-              await logRequestEvent(correlationId, targetModel, 'mantle', statusCode, latencyMs);
+              // Logged model is the actually-invoked Mantle model, not the client's requested model (#31).
+              await logRequestEvent(correlationId, mantleModelId, 'mantle', statusCode, latencyMs);
               await recordRequestTelemetry({
                 correlationId, inputTokens: it, outputTokens: ot, chosenRouteId,
                 activeMode, suggestedRouteId, isOverride, promptLength: promptText.length, routingReason,
@@ -1336,7 +1372,8 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicRequestBody 
 
     const endTime   = process.hrtime(startTime);
     const latencyMs = Math.round(endTime[0] * 1000 + endTime[1] / 1000000);
-    await logRequestEvent(correlationId, targetModel, 'mantle', mantleStatusCode, latencyMs);
+    // Logged model is the actually-invoked Mantle model, not the client's requested model (#31).
+    await logRequestEvent(correlationId, mantleModelId, 'mantle', mantleStatusCode, latencyMs);
     await recordRequestTelemetry({ correlationId, inputTokens, outputTokens, chosenRouteId,
       activeMode, suggestedRouteId, isOverride, promptLength: promptText.length, routingReason });
     lastRequestCache = { timestamp: Date.now(), promptText, routeUsed: chosenRouteId,
@@ -1469,7 +1506,8 @@ const messagesHandler = async (req: FastifyRequest<{ Body: AnthropicRequestBody 
 
     const endTime = process.hrtime(startTime);
     const latencyMs = Math.round(endTime[0] * 1000 + endTime[1] / 1000000);
-    await logRequestEvent(correlationId, targetModel, 'bedrock', bedrockStatusCode, latencyMs);
+    // Logged model is the actually-invoked Bedrock model ARN, not the client's requested model (#31).
+    await logRequestEvent(correlationId, bedrockEntry?.bedrockModelId || chosenRouteId, 'bedrock', bedrockStatusCode, latencyMs);
 
     await recordRequestTelemetry({
       correlationId,
@@ -1951,24 +1989,26 @@ const start = async () => {
     policyEngine.validateForcedRoutes(VALID_ROUTE_IDS);
 
     // Perform initial health checks immediately at startup to avoid 10s delay window
-    isVllmHealthy = await checkVllmHealth().catch(() => false);
-    isVpnHealthy  = await checkVpnHealth().catch(() => false);
+    isVllmHealthy   = await checkVllmHealth().catch(() => false);
+    isVpnHealthy    = await checkVpnHealth().catch(() => false);
+    isMantleHealthy = await checkMantleHealth().catch(() => false);
 
-    // EKS vLLM and VPN health ping loops — update module vars only, never mutate registry objects.
+    // EKS vLLM, VPN, and Mantle health ping loops — update module vars only, never mutate registry objects.
     setInterval(async () => {
-      isVllmHealthy = await checkVllmHealth().catch(() => false);
-      isVpnHealthy  = await checkVpnHealth().catch(() => false);
+      isVllmHealthy   = await checkVllmHealth().catch(() => false);
+      isVpnHealthy    = await checkVpnHealth().catch(() => false);
+      isMantleHealthy = await checkMantleHealth().catch(() => false);
     }, 10000);
 
     try {
-      await server.listen({ port: PORT, host: '0.0.0.0' });
+      await server.listen({ port: PORT, host: '127.0.0.1' });
       server.log.info(`ccr Gateway listening on port ${PORT}`);
     } catch (err: any) {
       if (err?.code === 'EADDRINUSE') {
         server.log.warn(`Port ${PORT} in use — killing old process and retrying in 1s...`);
         freePort(PORT);
         await new Promise(r => setTimeout(r, 1000));
-        await server.listen({ port: PORT, host: '0.0.0.0' });
+        await server.listen({ port: PORT, host: '127.0.0.1' });
         server.log.info(`ccr Gateway listening on port ${PORT} (after port recovery)`);
       } else {
         server.log.error(err);

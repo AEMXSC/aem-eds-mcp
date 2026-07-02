@@ -220,7 +220,10 @@ export async function renderDashboard(vllmHealthy = true, vpnHealthy = true): Pr
   // Generate request rows (render full list so client-side filter can manage pagination/searching)
   const requestRows = db.request_events.map(e => {
     const isError = e.status >= 400;
-    const isBlock = e.status === 400;
+    // 400 = policy block, 429 = loop-detector block. Both are enforcement blocks, not
+    // upstream errors — treating only 400 as blocked showed loop-detector hits as
+    // "429 (Allowed)" even though the Recent Policy Alerts panel logged them as BLOCK.
+    const isBlock = e.status === 400 || e.status === 429;
     const isWarn = e.status === 200 && db.policy_hits.some(h => h.correlation_id === e.correlation_id && h.action === 'warn');
     const statusClass = isBlock ? 'status-block' : isWarn ? 'status-warn' : isError ? 'status-block' : 'status-allow';
     const actionText = isBlock ? 'Blocked' : isWarn ? 'Warned' : 'Allowed';

@@ -5,8 +5,10 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "dev:edge": "tsx watch src/edge.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "start:edge": "node dist/edge.js",
     "start:resilient": "npm run build && node --max-old-space-size=512 dist/server.js"
   },
   "dependencies": {

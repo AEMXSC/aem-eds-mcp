@@ -138,18 +138,43 @@ async function writeDb(data: DatabaseSchema): Promise<void> {
   }
 }
 
+// Every mutating export below used to do its own independent readDb() -> mutate -> writeDb()
+// cycle with no coordination between them. Under real concurrent load (multiple in-flight
+// /v1/messages requests each logging events, plus route-config changes, plus policy hit
+// counters) two of these read-modify-write cycles can interleave: both read the same
+// on-disk snapshot, each mutates its own piece, and whichever writes last silently discards
+// the other's change — including things like an explicit route-config change getting wiped
+// out by an unrelated request's telemetry write moments later, with no error anywhere. This
+// queues every read-modify-write cycle through a single in-process chain so they execute
+// strictly one at a time. Sufficient because ccr-core is the only process that ever writes
+// this file — no cross-process locking needed.
+let dbLock: Promise<unknown> = Promise.resolve();
+
+function withDbLock<T>(mutator: (db: DatabaseSchema) => T | Promise<T>): Promise<T> {
+  const result = dbLock.then(async () => {
+    const db = await readDb();
+    const ret = await mutator(db);
+    await writeDb(db);
+    return ret;
+  });
+  // Keep the queue moving even if this op rejected — callers still see their own rejection
+  // via `result`, but a single failure must not wedge every subsequent queued operation.
+  dbLock = result.catch(() => {});
+  return result;
+}
+
 /**
  * Initializes the database.
  */
 export async function initDatabase(): Promise<void> {
   console.log(`Initializing JSON database at ${DB_FILE}...`);
-  const db = await readDb();
-  if (!db.policy_rules || db.policy_rules.length === 0) {
-    db.policy_rules = DEFAULT_RULES.map(r => ({ ...r, hit_count: 0 }));
-    db.tool_call_records = [];
-    db.cache_spend_records = [];
-    await writeDb(db);
-  }
+  await withDbLock((db) => {
+    if (!db.policy_rules || db.policy_rules.length === 0) {
+      db.policy_rules = DEFAULT_RULES.map(r => ({ ...r, hit_count: 0 }));
+      db.tool_call_records = [];
+      db.cache_spend_records = [];
+    }
+  });
   console.log('JSON database successfully initialized.');
 }
 
@@ -164,51 +189,51 @@ export async function getPolicies(): Promise<PolicyRule[]> {
  * Add or update a policy rule.
  */
 export async function savePolicy(rule: PolicyRule): Promise<void> {
-  const db = await readDb();
-  if (!db.policy_rules) {
-    db.policy_rules = [];
-  }
-  const idx = db.policy_rules.findIndex(r => r.id === rule.id);
-  if (idx > -1) {
-    db.policy_rules[idx] = {
-      ...db.policy_rules[idx],
-      ...rule,
-      hit_count: db.policy_rules[idx].hit_count || 0,
-      last_matched_at: db.policy_rules[idx].last_matched_at
-    };
-  } else {
-    db.policy_rules.push({
-      ...rule,
-      hit_count: 0
-    });
-  }
-  await writeDb(db);
+  await withDbLock((db) => {
+    if (!db.policy_rules) {
+      db.policy_rules = [];
+    }
+    const idx = db.policy_rules.findIndex(r => r.id === rule.id);
+    if (idx > -1) {
+      db.policy_rules[idx] = {
+        ...db.policy_rules[idx],
+        ...rule,
+        hit_count: db.policy_rules[idx].hit_count || 0,
+        last_matched_at: db.policy_rules[idx].last_matched_at
+      };
+    } else {
+      db.policy_rules.push({
+        ...rule,
+        hit_count: 0
+      });
+    }
+  });
 }
 
 /**
  * Delete a policy rule.
  */
 export async function deletePolicy(id: string): Promise<void> {
-  const db = await readDb();
-  if (db.policy_rules) {
-    db.policy_rules = db.policy_rules.filter(r => r.id !== id);
-  }
-  await writeDb(db);
+  await withDbLock((db) => {
+    if (db.policy_rules) {
+      db.policy_rules = db.policy_rules.filter(r => r.id !== id);
+    }
+  });
 }
 
 /**
  * Increment matching hit counter for a policy rule.
  */
 export async function incrementPolicyHits(id: string): Promise<void> {
-  const db = await readDb();
-  if (db.policy_rules) {
-    const rule = db.policy_rules.find(r => r.id === id);
-    if (rule) {
-      rule.hit_count = (rule.hit_count || 0) + 1;
-      rule.last_matched_at = new Date().toISOString();
-      await writeDb(db);
+  await withDbLock((db) => {
+    if (db.policy_rules) {
+      const rule = db.policy_rules.find(r => r.id === id);
+      if (rule) {
+        rule.hit_count = (rule.hit_count || 0) + 1;
+        rule.last_matched_at = new Date().toISOString();
+      }
     }
-  }
+  });
 }
 
 /**
@@ -221,21 +246,21 @@ export async function logRequestEvent(
   status: number,
   latencyMs: number
 ): Promise<void> {
-  const db = await readDb();
-  const newEvent: RequestEvent = {
-    id: uuidv4(),
-    correlation_id: correlationId,
-    timestamp: new Date().toISOString(),
-    model,
-    provider,
-    status,
-    latency_ms: latencyMs
-  };
-  db.request_events.push(newEvent);
-  if (db.request_events.length > 5000) {
-    db.request_events = db.request_events.slice(-5000);
-  }
-  await writeDb(db);
+  await withDbLock((db) => {
+    const newEvent: RequestEvent = {
+      id: uuidv4(),
+      correlation_id: correlationId,
+      timestamp: new Date().toISOString(),
+      model,
+      provider,
+      status,
+      latency_ms: latencyMs
+    };
+    db.request_events.push(newEvent);
+    if (db.request_events.length > 5000) {
+      db.request_events = db.request_events.slice(-5000);
+    }
+  });
 }
 
 /**
@@ -247,20 +272,20 @@ export async function logPolicyHit(
   action: string,
   matchedValue?: string
 ): Promise<void> {
-  const db = await readDb();
-  const newHit: PolicyHit = {
-    id: uuidv4(),
-    correlation_id: correlationId,
-    rule_id: ruleId,
-    action,
-    matched_value: matchedValue || null,
-    timestamp: new Date().toISOString()
-  };
-  db.policy_hits.push(newHit);
-  if (db.policy_hits.length > 5000) {
-    db.policy_hits = db.policy_hits.slice(-5000);
-  }
-  await writeDb(db);
+  await withDbLock((db) => {
+    const newHit: PolicyHit = {
+      id: uuidv4(),
+      correlation_id: correlationId,
+      rule_id: ruleId,
+      action,
+      matched_value: matchedValue || null,
+      timestamp: new Date().toISOString()
+    };
+    db.policy_hits.push(newHit);
+    if (db.policy_hits.length > 5000) {
+      db.policy_hits = db.policy_hits.slice(-5000);
+    }
+  });
 }
 
 /**
@@ -274,22 +299,22 @@ export async function logSpendRecord(
   baselineCost: number,
   delta: number
 ): Promise<void> {
-  const db = await readDb();
-  const newSpend: SpendRecord = {
-    id: uuidv4(),
-    correlation_id: correlationId,
-    input_tokens: inputTokens,
-    output_tokens: outputTokens,
-    actual_cost: actualCost,
-    baseline_cost: baselineCost,
-    delta,
-    timestamp: new Date().toISOString()
-  };
-  db.spend_records.push(newSpend);
-  if (db.spend_records.length > 5000) {
-    db.spend_records = db.spend_records.slice(-5000);
-  }
-  await writeDb(db);
+  await withDbLock((db) => {
+    const newSpend: SpendRecord = {
+      id: uuidv4(),
+      correlation_id: correlationId,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      actual_cost: actualCost,
+      baseline_cost: baselineCost,
+      delta,
+      timestamp: new Date().toISOString()
+    };
+    db.spend_records.push(newSpend);
+    if (db.spend_records.length > 5000) {
+      db.spend_records = db.spend_records.slice(-5000);
+    }
+  });
 }
 
 /**
@@ -307,14 +332,14 @@ export async function getRouteConfig(): Promise<RouteConfig> {
  * Save the active route and mode configuration.
  */
 export async function saveRouteConfig(config: Partial<RouteConfig>): Promise<void> {
-  const db = await readDb();
-  if (config.activeRoute !== undefined) {
-    db.active_route = config.activeRoute;
-  }
-  if (config.activeMode !== undefined) {
-    db.active_mode = config.activeMode;
-  }
-  await writeDb(db);
+  await withDbLock((db) => {
+    if (config.activeRoute !== undefined) {
+      db.active_route = config.activeRoute;
+    }
+    if (config.activeMode !== undefined) {
+      db.active_mode = config.activeMode;
+    }
+  });
 }
 
 /**
@@ -328,20 +353,20 @@ export async function logFeedback(
   rating: string,
   comments: string
 ): Promise<void> {
-  const db = await readDb();
-  const record: FeedbackRecord = {
-    id: uuidv4(),
-    correlationId,
-    outcome,
-    rating,
-    comments,
-    timestamp: new Date().toISOString()
-  };
-  db.feedback_records.push(record);
-  if (db.feedback_records.length > 5000) {
-    db.feedback_records = db.feedback_records.slice(-5000);
-  }
-  await writeDb(db);
+  await withDbLock((db) => {
+    const record: FeedbackRecord = {
+      id: uuidv4(),
+      correlationId,
+      outcome,
+      rating,
+      comments,
+      timestamp: new Date().toISOString()
+    };
+    db.feedback_records.push(record);
+    if (db.feedback_records.length > 5000) {
+      db.feedback_records = db.feedback_records.slice(-5000);
+    }
+  });
 }
 
 /**
@@ -349,30 +374,30 @@ export async function logFeedback(
  * Resets policy rules to default rules with 0 hit counts.
  */
 export async function clearAllData(): Promise<void> {
-  const db = await readDb();
-  db.request_events = [];
-  db.policy_hits = [];
-  db.spend_records = [];
-  db.feedback_records = [];
-  db.tool_call_records = [];
-  db.cache_spend_records = [];
-  db.policy_rules = DEFAULT_RULES.map(r => ({ ...r, hit_count: 0 }));
-  await writeDb(db);
+  await withDbLock((db) => {
+    db.request_events = [];
+    db.policy_hits = [];
+    db.spend_records = [];
+    db.feedback_records = [];
+    db.tool_call_records = [];
+    db.cache_spend_records = [];
+    db.policy_rules = DEFAULT_RULES.map(r => ({ ...r, hit_count: 0 }));
+  });
 }
 
 /**
  * Log a tool call record for loop detection.
  */
 export async function logToolCallRecord(record: ToolCallRecord): Promise<void> {
-  const db = await readDb();
-  if (!db.tool_call_records) {
-    db.tool_call_records = [];
-  }
-  db.tool_call_records.push(record);
-  if (db.tool_call_records.length > 10000) {
-    db.tool_call_records = db.tool_call_records.slice(-10000);
-  }
-  await writeDb(db);
+  await withDbLock((db) => {
+    if (!db.tool_call_records) {
+      db.tool_call_records = [];
+    }
+    db.tool_call_records.push(record);
+    if (db.tool_call_records.length > 10000) {
+      db.tool_call_records = db.tool_call_records.slice(-10000);
+    }
+  });
 }
 
 /**
@@ -386,24 +411,24 @@ export async function logCacheSpendRecord(
   baselineCost: number,
   delta: number
 ): Promise<void> {
-  const db = await readDb();
-  if (!db.cache_spend_records) {
-    db.cache_spend_records = [];
-  }
-  const newRecord: CacheSpendRecord = {
-    id: uuidv4(),
-    correlation_id: correlationId,
-    original_tokens: originalTokens,
-    cached_tokens: cachedTokens,
-    actual_cost: actualCost,
-    baseline_cost: baselineCost,
-    delta,
-    timestamp: new Date().toISOString()
-  };
-  db.cache_spend_records.push(newRecord);
-  if (db.cache_spend_records.length > 5000) {
-    db.cache_spend_records = db.cache_spend_records.slice(-5000);
-  }
-  await writeDb(db);
+  await withDbLock((db) => {
+    if (!db.cache_spend_records) {
+      db.cache_spend_records = [];
+    }
+    const newRecord: CacheSpendRecord = {
+      id: uuidv4(),
+      correlation_id: correlationId,
+      original_tokens: originalTokens,
+      cached_tokens: cachedTokens,
+      actual_cost: actualCost,
+      baseline_cost: baselineCost,
+      delta,
+      timestamp: new Date().toISOString()
+    };
+    db.cache_spend_records.push(newRecord);
+    if (db.cache_spend_records.length > 5000) {
+      db.cache_spend_records = db.cache_spend_records.slice(-5000);
+    }
+  });
 }
 

@@ -6,7 +6,7 @@ services:
     container_name: ccr-postgres
     environment:
       POSTGRES_USER: ccr_admin
-      POSTGRES_PASSWORD: ccr_secure_password_2026
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ccr_db
     ports:
       - "5432:5432"

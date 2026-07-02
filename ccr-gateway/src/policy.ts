@@ -56,7 +56,11 @@ export const DEFAULT_RULES: readonly PolicyRule[] = Object.freeze([
     // 'route' mode: allows the request but overrides routing to low-egress model.
     mode: 'route',
     type: 'file_path',
-    pattern: '\\.conf$|config\\.json$',
+    // Path-boundary before "config.json" (start of path or a slash) so this only matches an
+    // actual file named config.json, not any name that merely ends in those characters —
+    // tsconfig.json/jsconfig.json were false-positives that silently overrode every route
+    // selection in ordinary TypeScript/JS projects.
+    pattern: '\\.conf$|(^|[\\\\/])config\\.json$',
     description: 'Forces configuration file reads to utilize low-egress managed AWS routes',
     forcedRoute: 'aws-hosted/qwen-coder-32b'
   },
