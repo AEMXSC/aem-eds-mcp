@@ -1,0 +1,340 @@
+---
+import { getCollection } from 'astro:content';
+import { Image } from 'astro:assets';
+import Base from '../layouts/Base.astro';
+import Header from '../components/Header.astro';
+import Newsletter from '../components/Newsletter.astro';
+import Footer from '../components/Footer.astro';
+import { eventImages, eventsHero } from '../lib/eventImages';
+
+const now = new Date();
+const all = await getCollection('events');
+const upcoming = all
+  .filter((e) => e.data.date.valueOf() >= now.valueOf())
+  .sort((a, b) => a.data.date.valueOf() - b.data.date.valueOf());
+const past = all
+  .filter((e) => e.data.date.valueOf() < now.valueOf())
+  .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
+
+/* Next event gets the big featured treatment; any others fall into the grid. */
+const [featured, ...restUpcoming] = upcoming;
+
+const dateFmt = new Intl.DateTimeFormat('en-CA', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  timeZone: 'America/Edmonton',
+});
+---
+<Base
+  title="Events | Zyra Vodka"
+  description="Catch Zyra out in the wild: tastings, pop-ups, and pours. See where we've been and join the list to hear where we'll be next."
+>
+  <Header overlayHero />
+  <main id="main">
+    {/* Photographic hero — the live site's own events-page photo, with the
+        transparent header treatment the homepage uses. */}
+    <section class="evhero">
+      <Image
+        class="evhero__img"
+        src={eventsHero}
+        alt=""
+        widths={[768, 1280, 2000]}
+        sizes="100vw"
+        loading="eager"
+        fetchpriority="high"
+      />
+      <div class="evhero__overlay" aria-hidden="true"></div>
+      <div class="container evhero__content">
+        <p class="kicker">Media · Events</p>
+        <hr class="rule" />
+        <h1>Catch us out there.</h1>
+        <p class="lead evhero__lead">
+          Tastings, pop-ups, and pours: we bring Zyra to good times all over
+          Alberta.
+        </p>
+      </div>
+    </section>
+
+    <section class="section section--brown">
+      <div class="container">
+        <header class="events__group-head">
+          <h2>Upcoming Events</h2>
+        </header>
+
+        {featured ? (
+          <article class="feat">
+            <a class="feat__media" href={`/events/${featured.id}`}>
+              <Image
+                src={eventImages[featured.id]}
+                alt=""
+                widths={[540, 810, 1080]}
+                sizes="(min-width: 60rem) 34rem, 100vw"
+              />
+            </a>
+            <div class="feat__body">
+              <p class="feat__badge">Next up</p>
+              <span class="ecard__date">{dateFmt.format(featured.data.date)}</span>
+              <h3 class="feat__title">{featured.data.title}</h3>
+              <p class="ecard__location">{featured.data.location}</p>
+              <p class="feat__desc">{featured.data.description}</p>
+              <div class="feat__actions">
+                <a class="btn btn--gold" href={`/events/${featured.id}`}>View details</a>
+                {featured.data.ctaHref && (
+                  <a class="btn btn--ghost" href={featured.data.ctaHref} target="_blank" rel="noopener">
+                    {featured.data.ctaLabel ?? 'Learn more'} ↗
+                  </a>
+                )}
+              </div>
+            </div>
+          </article>
+        ) : (
+          <div class="events__empty">
+            <p class="lead">
+              Nothing on the calendar this minute, but the next one is never far
+              off. Join the list and we'll tell you where we'll be.
+            </p>
+            <a class="btn btn--gold" href="#signup">Get event alerts</a>
+          </div>
+        )}
+
+        {restUpcoming.length > 0 && (
+          <ul class="events__grid events__grid--upcoming" role="list">
+            {restUpcoming.map((event) => (
+              <li class="ecard">
+                <a class="ecard__body" href={`/events/${event.id}`}>
+                  <span class="ecard__media">
+                    <Image
+                      src={eventImages[event.id]}
+                      alt=""
+                      widths={[480, 768, 1024]}
+                      sizes="(min-width: 64rem) 30vw, 100vw"
+                    />
+                  </span>
+                  <span class="ecard__content">
+                    <span class="ecard__date">{dateFmt.format(event.data.date)}</span>
+                    <h3 class="ecard__title">{event.data.title}</h3>
+                    <p class="ecard__location">{event.data.location}</p>
+                    <span class="ecard__more">View details →</span>
+                  </span>
+                </a>
+                {event.data.ctaHref && (
+                  <a class="ecard__link" href={event.data.ctaHref} target="_blank" rel="noopener">
+                    {event.data.ctaLabel ?? 'Learn more'} ↗
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+
+    {past.length > 0 && (
+      <section class="section section--dark">
+        <div class="container">
+          <header class="events__group-head">
+            <h2>Past Events</h2>
+            <p class="events__group-sub">Where Zyra has already poured.</p>
+          </header>
+          <ul class="events__grid" role="list">
+            {past.map((event) => (
+              <li class="ecard ecard--past">
+                <a class="ecard__body" href={`/events/${event.id}`}>
+                  <span class="ecard__media">
+                    <Image
+                      src={eventImages[event.id]}
+                      alt=""
+                      widths={[480, 768, 1024]}
+                      sizes="(min-width: 64rem) 30vw, 100vw"
+                    />
+                  </span>
+                  <span class="ecard__content">
+                    <span class="ecard__date">{dateFmt.format(event.data.date)}</span>
+                    <h3 class="ecard__title">{event.data.title}</h3>
+                    <p class="ecard__location">{event.data.location}</p>
+                    <span class="ecard__more">View details →</span>
+                  </span>
+                </a>
+                {event.data.ctaHref && (
+                  <a class="ecard__link" href={event.data.ctaHref} target="_blank" rel="noopener">
+                    {event.data.ctaLabel ?? 'Learn more'} ↗
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+    )}
+
+    <section class="section section--brown pitch">
+      <div class="container pitch__inner">
+        <p class="kicker">Bring Zyra to Your Event</p>
+        <hr class="rule" />
+        <h2>Bold flavor, big moments.</h2>
+        <p class="lead pitch__lead">
+          Custom cocktail menus, a mobile bar cart, on-site tasting staff, and
+          social activations: we bring the full Zyra experience to your event,
+          built around Root Beer Rush, Coco Mist, and Zyra Gold.
+        </p>
+        <a class="btn btn--gold" href="/contact">Get in touch</a>
+      </div>
+    </section>
+
+    <Newsletter />
+  </main>
+  <Footer />
+</Base>
+
+<style>
+  /* ---- photographic hero ---- */
+  .evhero {
+    position: relative;
+    display: grid;
+    place-items: center;
+    min-height: min(38rem, 72vh);
+    text-align: center;
+    background: var(--base);
+  }
+  .evhero__img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: 50% 58%;
+  }
+  .evhero__overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.35) 45%, rgba(0, 0, 0, 0.72));
+  }
+  .evhero__content {
+    position: relative;
+    max-width: 44rem;
+    padding-block: var(--space-24) var(--space-16);
+  }
+  .evhero__content .rule { margin-inline: auto; }
+  .evhero__lead { margin-top: var(--space-6); margin-inline: auto; color: var(--ink-on-dark); }
+
+  /* Sized and treated identically to the cocktails page hero (.ckhero) so
+     the two section-landing pages read as siblings — same min-height,
+     centered copy, same bottom-weighted gradient. The portrait source photo
+     means only a horizontal band is revealed at this height; object-position
+     above picks the band with the raised bottle. */
+
+  .events__group-head { text-align: center; margin-bottom: var(--space-12); }
+  .events__group-sub { margin-top: var(--space-3); color: var(--ink-on-dark-mute); }
+
+  .events__empty {
+    max-width: 34rem;
+    margin-inline: auto;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-6);
+  }
+  .events__empty .lead { color: var(--ink-on-dark-mute); }
+
+  /* ---- featured next event: flyer beside the details ---- */
+  .feat {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    background: var(--base);
+    border: 1px solid var(--line-on-dark);
+    border-top: 3px solid var(--gold);
+    border-radius: var(--radius-media);
+    overflow: hidden;
+  }
+  .feat__media { display: block; overflow: hidden; }
+  .feat__media img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.4s var(--ease);
+  }
+  .feat__media:hover img { transform: scale(1.03); }
+  .feat__body {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: clamp(1.5rem, 3.5vw, 3rem);
+  }
+  .feat__badge {
+    align-self: flex-start;
+    font-size: var(--fs-kicker);
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--base);
+    background: var(--gold);
+    padding: 0.3rem 0.7rem;
+    border-radius: var(--radius);
+    margin-bottom: var(--space-4);
+  }
+  .feat__title { margin-top: var(--space-3); font-family: var(--font-display); font-size: var(--fs-h2); line-height: 1.1; }
+  .feat__desc { margin-top: var(--space-4); color: var(--ink-on-dark-mute); line-height: 1.6; }
+  .feat__actions { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-top: var(--space-8); }
+
+  @media (max-width: 54rem) {
+    .feat { grid-template-columns: 1fr; }
+    .feat__media img { aspect-ratio: 4 / 5; max-height: 32rem; }
+  }
+
+  .events__grid {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: clamp(1.5rem, 3vw, 2.5rem);
+  }
+  .events__grid--upcoming { margin-top: clamp(1.5rem, 3vw, 2.5rem); }
+
+  .ecard {
+    display: flex;
+    flex-direction: column;
+    background: var(--base);
+    border: 1px solid var(--line-on-dark);
+    border-top: 3px solid var(--gold);
+    border-radius: var(--radius-media);
+    overflow: hidden;
+    transition: border-color 0.2s var(--ease);
+  }
+  .ecard:has(.ecard__body:hover) { border-color: var(--gold); }
+  .section--dark .ecard { background: var(--root-brown); }
+  .ecard__body { display: flex; flex-direction: column; flex: 1 1 auto; }
+  .ecard__media { display: block; overflow: hidden; }
+  .ecard__media img {
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    object-fit: cover;
+    transition: transform 0.4s var(--ease);
+  }
+  .ecard__body:hover .ecard__media img { transform: scale(1.04); }
+  .ecard__content { display: flex; flex-direction: column; flex: 1 1 auto; padding: var(--space-6); }
+  .ecard__date {
+    font-family: var(--font-body);
+    font-size: var(--fs-kicker);
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--gold);
+  }
+  .ecard__title { margin-top: var(--space-3); font-family: var(--font-display); font-size: var(--fs-h3); line-height: 1.2; color: var(--ink-on-dark); }
+  .ecard__location { margin-top: var(--space-2); font-weight: 600; color: var(--ink-on-dark); }
+  .ecard__more { margin-top: var(--space-4); display: inline-block; font-weight: 600; color: var(--ink-on-dark); transition: color 0.15s var(--ease); }
+  .ecard__body:hover .ecard__more { color: var(--gold); }
+  .ecard__link {
+    margin: 0 var(--space-6) var(--space-6);
+    display: inline-block;
+    font-weight: 600;
+    color: var(--gold);
+  }
+
+  .pitch__inner { max-width: 40rem; text-align: center; margin-inline: auto; }
+  .pitch__inner .rule { margin-inline: auto; }
+  .pitch__lead { margin-top: var(--space-6); margin-inline: auto; color: var(--ink-on-dark-mute); }
+  .pitch__inner .btn { margin-top: var(--space-8); }
+</style>
