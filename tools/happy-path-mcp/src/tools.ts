@@ -3,7 +3,9 @@ import { scrapeSite } from "./migration/scraper.js";
 import { analyzePageHtml, aggregateInventory } from "./migration/classifier.js";
 import { computeScore } from "./migration/scorer.js";
 import { generateMarkdownReport } from "./migration/report.js";
+import { parseSemrushContext } from "./migration/semrush.js";
 import type { ScoreResult } from "./migration/scorer.js";
+import type { SemrushContext } from "./migration/semrush.js";
 
 export const SERVER_VERSION = "1.0.0";
 
@@ -45,6 +47,49 @@ export const TOOLS: Tool[] = [
         customer_name: {
           type: "string",
           description: "Customer name for the report title",
+        },
+        semrush_data: {
+          type: "object",
+          description: "Optional SEO context from the Semrush MCP (call domain_overview / organic_research on the customer " +
+            "domain first, then map the results here). Adds an 'SEO & Traffic Context' section to the report.",
+          properties: {
+            domain: { type: "string" },
+            database: { type: "string", description: "Semrush region database, e.g. us" },
+            organic_traffic: { type: "number" },
+            organic_keywords: { type: "number" },
+            paid_traffic: { type: "number" },
+            authority_score: { type: "number" },
+            backlinks: { type: "number" },
+            referring_domains: { type: "number" },
+            top_pages: {
+              type: "array",
+              description: "Up to 10 top organic pages",
+              items: {
+                type: "object",
+                properties: {
+                  url: { type: "string" },
+                  traffic: { type: "number" },
+                  keywords: { type: "number" },
+                },
+                required: ["url"],
+              },
+            },
+            top_keywords: {
+              type: "array",
+              description: "Up to 10 top keywords",
+              items: {
+                type: "object",
+                properties: {
+                  keyword: { type: "string" },
+                  position: { type: "number" },
+                  volume: { type: "number" },
+                  traffic: { type: "number" },
+                },
+                required: ["keyword"],
+              },
+            },
+            notes: { type: "string" },
+          },
         },
       },
       required: ["score_data"],
@@ -96,7 +141,16 @@ export async function handleTool(name: string, args: Args): Promise<ReturnType<t
       if (!scoreData) return mcpError("score_data is required");
 
       const customerName = args.customer_name as string | undefined;
-      const report = generateMarkdownReport(scoreData, customerName);
+      let semrush: SemrushContext | undefined;
+      if (args.semrush_data !== undefined && args.semrush_data !== null) {
+        try {
+          semrush = parseSemrushContext(args.semrush_data);
+        } catch (err) {
+          return mcpError(err instanceof Error ? err.message : String(err));
+        }
+      }
+
+      const report = generateMarkdownReport(scoreData, customerName, semrush);
       return mcpText(report);
     }
 

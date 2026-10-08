@@ -3,16 +3,23 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { SERVER_VERSION, TOOLS, handleTool, type Args } from "./tools.js";
+import { callSemrushTool, isSemrushTool, listSemrushTools } from "./semrush-proxy.js";
 
 const server = new Server(
   { name: "happy-path-mcp", version: SERVER_VERSION },
   { capabilities: { tools: {} } }
 );
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+// stdio is a local, trusted process: Semrush tools are on whenever SEMRUSH_API_KEY is set.
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: [...TOOLS, ...(await listSemrushTools())],
+}));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args = {} } = request.params;
+  if (!TOOLS.some(t => t.name === name) && (await isSemrushTool(name))) {
+    return callSemrushTool(name, args as Args);
+  }
   return handleTool(name, args as Args);
 });
 

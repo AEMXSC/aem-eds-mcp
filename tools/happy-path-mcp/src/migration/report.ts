@@ -1,6 +1,12 @@
 import type { ScoreResult } from "./scorer.js";
+import { renderSemrushSection } from "./semrush.js";
+import type { SemrushContext } from "./semrush.js";
 
-export function generateMarkdownReport(result: ScoreResult, customerName?: string): string {
+export function generateMarkdownReport(
+  result: ScoreResult,
+  customerName?: string,
+  semrush?: SemrushContext,
+): string {
   const { score, ease, blockInventory: inv, riskFactors, phases, assumptions, url, assessedAt } = result;
   const date = assessedAt.slice(0, 10);
   const title = customerName ? `${customerName} — Migration Assessment` : `Migration Assessment: ${url}`;
@@ -39,6 +45,7 @@ export function generateMarkdownReport(result: ScoreResult, customerName?: strin
   }).join("\n\n");
 
   const assumptionsList = assumptions.map(a => `- ${a}`).join("\n");
+  const semrushSection = semrush ? `${renderSemrushSection(semrush)}\n\n---\n\n` : "";
 
   return `# ${title}
 
@@ -71,7 +78,7 @@ ${phaseSection}
 
 ---
 
-## Assumptions
+${semrushSection}## Assumptions
 
 ${assumptionsList}
 
