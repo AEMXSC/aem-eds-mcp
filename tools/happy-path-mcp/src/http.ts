@@ -6,6 +6,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { SERVER_VERSION, TOOLS, handleTool, type Args } from "./tools.js";
 import { scoreRoute } from "./rest.js";
+import { callSemrushTool, isAuthorizedForSemrush, isSemrushTool, listSemrushTools } from "./semrush-proxy.js";
 
 const PORT = parseInt(process.env.PORT ?? "3002", 10);
 const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
@@ -29,18 +30,33 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
-function createMcpServer() {
+function createMcpServer(semrushAllowed: boolean) {
   const server = new Server(
     { name: "happy-path-mcp", version: SERVER_VERSION },
     { capabilities: { tools: { listChanged: true } } },
   );
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: semrushAllowed ? [...TOOLS, ...(await listSemrushTools())] : TOOLS,
+  }));
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const { name, arguments: args = {} } = req.params;
+    if (!TOOLS.some(t => t.name === name) && (await isSemrushTool(name))) {
+      if (!semrushAllowed) {
+        return { content: [{ type: "text" as const, text: "Error: Semrush tools require a valid bearer token" }], isError: true };
+      }
+      return callSemrushTool(name, args as Args);
+    }
     return handleTool(name, args as Args);
   });
   return server;
 }
+
+// Evaluated per HTTP request; the result is fixed for the life of a session at initialize.
+const semrushAllowedFor = (req: Request): boolean =>
+  isAuthorizedForSemrush(req.headers.authorization, req.params.secret);
+
+// `/mcp` and `/mcp/:secret` are the same endpoint; the secret segment only unlocks Semrush tools.
+const MCP_PATHS = ["/mcp", "/mcp/:secret"];
 
 // ─── Express app ─────────────────────────────────────────────────────────────
 
@@ -58,7 +74,7 @@ app.use((req, res, next) => {
 
 // ─── MCP Streamable HTTP ──────────────────────────────────────────────────────
 
-app.post("/mcp", async (req: Request, res: Response) => {
+app.post(MCP_PATHS, async (req: Request, res: Response) => {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
   // Existing session
@@ -82,13 +98,13 @@ app.post("/mcp", async (req: Request, res: Response) => {
         transport.onclose = () => sessions.delete(id); // capture `id`, not sessionId getter
       },
     });
-    const server = createMcpServer();
+    const server = createMcpServer(semrushAllowedFor(req));
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
   } else {
     // Stateless: AO and other clients that skip initialize (e.g. direct tools/list)
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    const server = createMcpServer();
+    const server = createMcpServer(semrushAllowedFor(req));
     try {
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
@@ -98,7 +114,7 @@ app.post("/mcp", async (req: Request, res: Response) => {
   }
 });
 
-app.get("/mcp", async (req: Request, res: Response) => {
+app.get(MCP_PATHS, async (req: Request, res: Response) => {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
   const entry = sessionId ? sessions.get(sessionId) : undefined;
   if (!entry) { res.status(404).json({ error: "Session not found" }); return; }
@@ -106,7 +122,7 @@ app.get("/mcp", async (req: Request, res: Response) => {
   await entry.transport.handleRequest(req, res);
 });
 
-app.delete("/mcp", (req: Request, res: Response) => {
+app.delete(MCP_PATHS, (req: Request, res: Response) => {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
   if (!sessionId || !sessions.has(sessionId)) { res.status(404).end(); return; }
   sessions.get(sessionId)!.transport.close();
